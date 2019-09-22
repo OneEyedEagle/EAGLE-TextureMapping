@@ -31,7 +31,6 @@ public:
     std::ofstream log;
 
     std::vector<cv::Mat1f> cameraPoses; // cameraPos matrix's array
-    std::vector<cv::Mat3f> sourcesNormals; // origin source's point normals
 
     std::string sourcesPath; // Si - sources' path
     std::string targetsPath; // Ti - targets' path
@@ -45,50 +44,34 @@ public:
     size_t kfStart, kfTotal;
     std::vector<size_t> kfIndexs;
 
-    std::vector<cv::Mat1i> depthsImgs;
     std::vector<cv::Mat3b> sourcesImgs;
     std::vector<cv::Mat3b> targetsImgs;
     std::vector<cv::Mat3b> texturesImgs;
-    cv::Rect rectImg;
 
-    float scaleF;
+    double scaleF;
+
+    pcl::PolygonMesh mesh;
+    std::map<size_t, std::vector<cv::Point2f>> uvs;
+    std::map<size_t, cv::Mat> weights;
+    std::map<size_t, std::map<size_t, cv::Mat>> mappings;
 
     getAlignResults(Settings &_settings);
     void LOG(std::string t, bool nl = true);
-    void DEBUG(std::string t);
 
-    size_t getImgID(std::string img_file);
     std::string getImgFile(size_t img_i);
-    std::string getImgDFile(size_t img_i);
-
     std::string getImgFilename(size_t img_i, std::string pre, std::string ext);
-    std::string getImgPLYFile(size_t img_i);
-    std::string getImgXMLFile(size_t img_i);
-
-    void loadSourcesPointN();
-    void calcSourcesPointN();
-    void calcSourceCloud(size_t img_i, pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, std::vector<cv::Point2i> &pos);
 
     void readCameraTraj(std::string camTraj_file);
-    cv::Mat projectToCWorld(int x, int y, int depth);
-    cv::Mat projectToCWorld(float x, float y, int depth);
-    cv::Mat projectToWorld(cv::Mat X_c, size_t id);
-    cv::Mat projectToCWorld(cv::Mat X_w, size_t id);
-    int calcDepth(cv::Mat X_w, size_t id);
     cv::Mat projectToImg(cv::Mat X_w, size_t id);
-    cv::Mat imgToScale(cv::Mat X_img);
-    cv::Mat scaleToImg(cv::Point2i p_img_s);
-    double calcWeightJ(size_t img_id, cv::Mat1f p, cv::Mat X_c);
+    bool pointValid(cv::Point2i p_img);
+    cv::Point2i imgToScale(cv::Point2i p_img);
+    cv::Point2i scaleToImg(cv::Point2i p_img_s);
 
-    cv::Vec3b getRGBonImg(cv::Mat img, cv::Mat X_img);
-    int getDonImg(cv::Mat depths, cv::Mat X_img);
-    cv::Vec3f getNonImg(cv::Mat normals, cv::Mat X_img);
-
-    bool isPointVisible(cv::Mat X_w, size_t id);
-    bool isPointOnRect(cv::Mat X, cv::Rect r);
-    bool isPointOnRect(cv::Point2i p, cv::Rect r);
-    bool isPointOnRect(int px, int py, cv::Rect r);
-    bool isPointOnRect(float px, float py, cv::Rect r);
+    void calcVertexInfo();
+    void calcImgWeight(size_t img_i, std::vector<float> vertex_weight);
+    void doRemapping();
+    void calcImgMapping(size_t img_i, size_t img_j);
+    cv::Mat3f calcPosCoord(cv::Point2f uv1, cv::Point2f uv2, cv::Point2f uv3, cv::Rect &pos);
 
     void calcPatchmatch();
     void patchMatch(std::string imgA_file, std::string imgB_file, std::string ann_raw_file, std::string annd_file);
@@ -98,17 +81,11 @@ public:
 
     void generateTargets();
     void generateTargetI(size_t target_id, std::vector<cv::Mat3b> textures);
-    std::vector<cv::Point2i> getPixelXYonSourceS2T(cv::Mat1i result_ann_s2t, cv::Point2i p);
-    std::vector<cv::Point2i> getPixelXYonSourceT2S(cv::Mat1i result_ann_t2s, cv::Point2i p);
-    void getPatchOnImg(cv::Rect &r, int x, int y);
+    void getSimilarityTerm(cv::Mat3b S, cv::Mat1i ann_s2t, cv::Mat1i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv);
+    void calcSuv(cv::Mat3b S, int i, int j, cv::Mat4i &s, int x, int y, int w);
 
     void generateTextures();
     void generateTextureI(size_t texture_id, std::vector<cv::Mat3b> targets);
-
-    void savePlysImage(std::string path, std::vector<cv::Mat3b> imgs);
-    void saveImagePly(std::string ply_fullname, size_t tid, cv::Mat3b img, cv::Mat1i depths);
-    void savePlys(std::string path);
-    void saveImagesPly(std::string ply_fullname, std::vector<cv::Mat3b> imgs);
 
 };
 

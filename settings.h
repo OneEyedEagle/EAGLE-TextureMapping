@@ -68,9 +68,9 @@ public:
 
         // energy function's parameters
         //   weight the similarity from Ti to Si
-        alpha = 1;
+        alpha = 2;
         //   weight how much Mi affects Ti
-        lambda = 2;//0.1;
+        lambda = 0.5;//0.1;
 
         // -----------------
         //  custom
@@ -81,16 +81,20 @@ public:
         //  init
         // -----------------
         // path of PatchMatch's bin
-        patchmatchBinFile = "/home/wsy/EAGLE/EAGLE-TextureMapping/patchmatch-2.1/eagle_pm_minimal";
+        patchmatchBinFile = "/home/wsy/TextureRecover/patchmatch-2.1/eagle_pm_minimal";
 
         // scale
         int x = originImgW;
         if( x > originImgH )
             x = originImgH;
-        scaleTimes = 4;//10;
+//        scaleTimes = 4;
+//        scaleFactor = 2;
+//        scaleInitW = 80;
+//        scaleInitH = 60;
+        scaleTimes = 5;
         scaleFactor = 2;//pow( x / 64.0, 1.0 / 9 );
-        scaleInitW = 80;//settings.originImgW * 1.0 / settings.originImgH * 64;
-        scaleInitH = 60;//64;
+        scaleInitW = 80;//originImgW * 1.0 / originImgH * 64;
+        scaleInitH = 64;
 
         // make the dir
         EAGLE::checkPath(keyFramesPath);
@@ -184,15 +188,15 @@ public:
     }
 
     void init_zhou(){
-        originImgW = 640;
-        originImgH = 480;
+        originImgW = 1280;
+        originImgH = 1024;
 
-        cameraFx = 525.0f;
-        cameraFy = 525.0f;
-        cameraCx = 319.5f;
-        cameraCy = 239.5f;
+        cameraFx = 1050.0f;
+        cameraFy = 1050.0f;
+        cameraCx = 639.5f;
+        cameraCy = 511.5f;
 
-        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou";
+        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full";
         rgbNameExt = "jpg";
         rgbNamePattern = "%05d." + rgbNameExt;
         dNamePattern = "%05d.png";
@@ -202,7 +206,7 @@ public:
         kfDNamePattern = "%05d.png";
         kfDMatch = "*.png";
 
-        kfIndexs = {0,1,3,4,6,7,8,11,12,15,19,22};
+        kfIndexs = {0,3,4,6,7,13,15,17,19,21};
     }
 };
 
