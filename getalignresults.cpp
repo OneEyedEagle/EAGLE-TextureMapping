@@ -8,7 +8,7 @@
 #define LOG_SAVE_T true
 #define LOG_SAVE_M true
 
-#define OUTPUT_T_M_INSTANT false
+#define OUTPUT_T_M_INSTANT true
 
 /*----------------------------------------------
  *  To get the position of the patchmatch result
@@ -252,7 +252,7 @@ void getAlignResults::calcVertexMapping()
     LOG("[ Calculating Weight of each Vertex ]");
 #pragma omp parallel for
     for(size_t i = 0; i < point_num; i++)
-        vertex_weight[i] = vertex_normal[i](2) * vertex_normal[i](2) / vertex_weight[i] * d2_min;
+        vertex_weight[i] = d2_min * vertex_normal[i](2) * vertex_normal[i](2) / vertex_weight[i];
 
     // interpolate vertex's weight to every pixel
     LOG("[ Calculating weight of every pixel on each Si ]");
@@ -261,6 +261,9 @@ void getAlignResults::calcVertexMapping()
     LOG( " Weights << ", false );
     for( size_t t : kfIndexs ) {
         weights[t] = cv::Mat1f( cv::Size(settings.originImgW, settings.originImgH) );
+        for( int i = 0; i < settings.originImgW; i++ )
+            for( int j = 0; j < settings.originImgH; j++ )
+                weights[t].at<float>(j, i) = 0;
         calcImgWeight(t, vertex_weight);
         LOG( std::to_string(t) + " ", false );
     }
@@ -277,6 +280,9 @@ void getAlignResults::calcVertexMapping()
         for( size_t img_j : kfIndexs ) {
             if( img_i != img_j ) {
                 mappings[img_i][img_j] = cv::Mat3i( cv::Size(settings.originImgW, settings.originImgH) );
+                for( int i = 0; i < settings.originImgW; i++ )
+                    for( int j = 0; j < settings.originImgH; j++ )
+                        mappings[img_i][img_j].at<cv::Vec3i>(j, i) = cv::Vec3i(0,0,0);
                 calcImgMapping(img_i, img_j);
             }
             LOG( std::to_string(img_j) + " ", false );
@@ -309,11 +315,10 @@ void getAlignResults::calcImgWeight(size_t img_i, std::vector<float> vertex_weig
             dy = index / pos.width;
             dx = index % pos.width;
             cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
-            if( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
+            cv::Point2i p_img( pos.x + dx, pos.y + dy );
+            if( pointValid(p_img) && lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
                 w = w1*lamda(0) + w2*lamda(1) + w3*lamda(2);
-                cv::Point2i p_img(pos.x + dx, pos.y + dy);
-                if( pointValid(p_img) )
-                    weights[img_i].at<float>(p_img.y, p_img.x) = w;
+                weights[img_i].at<float>(p_img.y, p_img.x) = w;
             }
         }
     }
@@ -367,19 +372,21 @@ void getAlignResults::calcImgMapping(size_t img_i, size_t img_j)
         cv::Point2f j_uv3 = uvs[img_j][p3];
 
         cv::Rect pos(0,0,0,0);
-        cv::Mat3d lamdas = calcPosCoord(i_uv1, i_uv2, i_uv3, pos);
-
+        cv::Mat3f lamdas = calcPosCoord(i_uv1, i_uv2, i_uv3, pos);
         int total = pos.width * pos.height;
         for ( int index = 0; index < total; index++ ) {
             int dy = index / pos.width;
             int dx = index % pos.width;
+            cv::Point2i p_img_i( pos.x + dx, pos.y + dy );
+            if ( ! pointValid(p_img_i) )
+                continue;
             cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
-            cv::Point2i p_img_i( round(pos.x + dx), round(pos.y + dy) );
-            if( pointValid(p_img_i) && lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ){
-                // get new coord on img_j
-                int x_new = std::round( j_uv1.x * lamda(0) + j_uv2.x * lamda(1) + j_uv3.x * lamda(2) ) - 1;
-                int y_new = std::round( j_uv1.y * lamda(0) + j_uv2.y * lamda(1) + j_uv3.y * lamda(2) ) - 1;
-                mappings[img_i][img_j].at<cv::Vec3i>(p_img_i.y, p_img_i.x) = cv::Vec3i(x_new, y_new, 1);
+            if ( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ){
+                float x_new = j_uv1.x * lamda(0) + j_uv2.x * lamda(1) + j_uv3.x * lamda(2);
+                float y_new = j_uv1.y * lamda(0) + j_uv2.y * lamda(1) + j_uv3.y * lamda(2);
+                if ( pointValid( cv::Vec2f(x_new, y_new) ) ) {
+                    mappings[img_i][img_j].at<cv::Vec3i>(p_img_i.y, p_img_i.x) = cv::Vec3i(round(x_new), round(y_new), 1);
+                }
             }
         }
     }
@@ -592,8 +599,8 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
                 count_M += 1;
             } else {
                 cv::Vec3i Xij = mappings[target_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
-                cv::Point2i p_img_t(cv::Point2i(Xij(0), Xij(1)));
-                if ( Xij(2) == 1 && pointValid(p_img_t) ){
+                if ( Xij(2) > 0 ){
+                    cv::Point2i p_img_t(cv::Point2i(Xij(0), Xij(1)));
                     cv::Point2i p_img_ts = imgToScale(p_img_t);
                     sum_M += textures[t].at<cv::Vec3b>(p_img_ts.y, p_img_ts.x);
                     count_M += 1;
@@ -700,15 +707,14 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
                 pixel = targets[t].at<cv::Vec3b>(j, i);
             } else {
                 cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
-                cv::Point2i p_img_t = cv::Point2i(Xij(0), Xij(1));
-                if ( Xij(2) == 1 && pointValid(p_img_t) ){
+                if ( Xij(2) > 0 ){
+                    cv::Point2i p_img_t = cv::Point2i(Xij(0), Xij(1));
                     weight = weights[t].at<float>(p_img_t.y, p_img_t.x);
                     cv::Point2i p_img_ts = imgToScale(p_img_t);
                     pixel = targets[t].at<cv::Vec3b>(p_img_ts.y, p_img_ts.x);
                 } else
                     flag_valid = false;
             }
-            //std::cout << "M: " << texture_id << " t: " << t << " " << pixel << " " << weight << std::endl;
             if(flag_valid == true) {
                 sum_w += weight;
                 sum_b = sum_b + weight * pixel(0);

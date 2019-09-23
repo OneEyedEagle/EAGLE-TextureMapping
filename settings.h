@@ -22,7 +22,7 @@ public:
     std::string pcdWorldFile, plyWorldFile, plySColorFilename, plyTColorFilename, plyMColorFilename;
 
     float cameraDepthFactor, cameraFx, cameraFy, cameraCx, cameraCy;
-    cv::Mat cameraK;
+    cv::Mat1f cameraK;
     std::vector<size_t> kfIndexs;
 
     Settings()
@@ -75,7 +75,7 @@ public:
         // -----------------
         //  custom
         // -----------------
-        init_zhou();
+//        init_zhou();
 
         // -----------------
         //  init
@@ -87,14 +87,14 @@ public:
         int x = originImgW;
         if( x > originImgH )
             x = originImgH;
-//        scaleTimes = 4;
-//        scaleFactor = 2;
-//        scaleInitW = 80;
-//        scaleInitH = 60;
-        scaleTimes = 5;
-        scaleFactor = 2;//pow( x / 64.0, 1.0 / 9 );
-        scaleInitW = 80;//originImgW * 1.0 / originImgH * 64;
-        scaleInitH = 64;
+        scaleTimes = 4;
+        scaleFactor = 2;
+        scaleInitW = 80;
+        scaleInitH = 60;
+//        scaleTimes = 5;
+//        scaleFactor = 2;//pow( x / 64.0, 1.0 / 9 );
+//        scaleInitW = 80;//originImgW * 1.0 / originImgH * 64;
+//        scaleInitH = 64;
 
         // make the dir
         EAGLE::checkPath(keyFramesPath);
@@ -196,7 +196,7 @@ public:
         cameraCx = 639.5f;
         cameraCy = 511.5f;
 
-        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full2";
+        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full";
         rgbNameExt = "jpg";
         rgbNamePattern = "%05d." + rgbNameExt;
         dNamePattern = "%05d.png";
