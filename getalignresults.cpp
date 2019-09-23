@@ -8,6 +8,8 @@
 #define LOG_SAVE_T true
 #define LOG_SAVE_M true
 
+#define OUTPUT_T_M_INSTANT false
+
 /*----------------------------------------------
  *  To get the position of the patchmatch result
  * ---------------------------------------------*/
@@ -27,22 +29,15 @@
 getAlignResults::getAlignResults(Settings &_settings)
 {
     settings = _settings;
-    /*----------------------------------------------
-     *  DEBUG
-     * ---------------------------------------------*/
-    // current scale's count (based on the origin resolution)
-    int scale = 0;
-    //scale = settings.scaleTimes - 1;
-
     LOG("[ From Path: " + settings.keyFramesPath + " ] ");
+    LOG("[ Alpha: " + std::to_string(settings.alpha) + " Lambda: " + std::to_string(settings.lambda) + " ] ");
+
     // get all keyframe imgs' full path
     sourcesPath = settings.keyFramesPath;
     EAGLE::checkPath(sourcesPath);
     cv::glob(sourcesPath + "/" + settings.kfRGBMatch, sourcesFiles, false);
-    std::vector<cv::String> originSourcesFiles(sourcesFiles); // origin sources
     // range of all frames
-    kfStart = 0;
-    kfTotal = sourcesFiles.size();
+    kfStart = 0; kfTotal = sourcesFiles.size();
     // range of valid frames
     if( settings.kfIndexs.size() > 0 ) {
         kfIndexs = settings.kfIndexs;
@@ -51,7 +46,6 @@ getAlignResults::getAlignResults(Settings &_settings)
         for( size_t i = kfStart; i < kfTotal; i++ )
             kfIndexs.push_back(i);
     }
-
     // make the dir to store targets
     targetsPath = sourcesPath + "/targets";
     EAGLE::checkPath(targetsPath);
@@ -65,83 +59,27 @@ getAlignResults::getAlignResults(Settings &_settings)
     // make the dir to store pm's results
     pmResultPath = sourcesPath + "/patchmatchs";
     EAGLE::checkPath(pmResultPath);
-
-    // read the camera's world positions of keyframes
-    LOG("[ Read Camera Matrixs ] ");
-    readCameraTraj(settings.kfCameraTxtFile);
-
-    // read the model with mesh
-    LOG("[ Read PLY Model ] ");
-    //pcl::PolygonMesh mesh;
-    pcl::io::loadPLYFile(settings.plyWorldFile, mesh);
-
-    calcVertexInfo();
-    doRemapping();
-
-    LOG("[ All inits Success. " + std::to_string(kfIndexs.size()) + " / " + std::to_string(kfTotal) + " Images. " +
-        std::to_string(settings.originImgW) + "x" + std::to_string(settings.originImgH) + " ]");
-    LOG("[ Alpha: " + std::to_string(settings.alpha) + " Lambda: " + std::to_string(settings.lambda) + " ] ");
-
-    // multiscale
-    for ( ; scale < settings.scaleTimes; scale++) {
-        // downsample imgs
-        settings.imgW = round(settings.scaleInitW * pow(settings.scaleFactor, scale));
-        settings.imgH = round(settings.scaleInitH * pow(settings.scaleFactor, scale));
-        scaleF = pow(settings.scaleFactor, settings.scaleTimes-1-scale);
-
-        char tmp[10];
-        sprintf(tmp, "%dx%d", settings.imgW, settings.imgH);
-        std::string newResolution(tmp);
-        LOG("[ Scale to " + newResolution + " ]");
-
-        // get all keyframes' full path (after scale)
-        sourcesPath = settings.keyFramesPath + "/" + newResolution;
-        EAGLE::checkPath(sourcesPath);
-        // generate source imgs with new resolution // [REQUIRE] ImageMagick
-        for( size_t i = 0; i < kfTotal; i++ )
-            system( ("convert " + originSourcesFiles[i] + " -resize " + newResolution + "! " + getImgFile(i)).c_str() );
-        cv::glob(sourcesPath + "/" + settings.kfRGBMatch, sourcesFiles, false);
-        // read Si
-        sourcesImgs.clear();
-        for ( size_t i = 0; i < kfTotal; i++ )
-            sourcesImgs.push_back( cv::imread(sourcesFiles[i]) ); // img.at<cv::Vec3b>(y, x)(0)
-
-        // init Ti and Mi or upsample
-        if ( targetsFiles.size() == 0 ) {
-            for( size_t i = 0; i < kfTotal; i++ ) {
-                system( ("cp " + sourcesFiles[i] + " " + targetsPath+"/").c_str() );
-                system( ("cp " + sourcesFiles[i] + " " + texturesPath+"/").c_str() );
-            }
-            cv::glob(targetsPath + "/" + settings.kfRGBMatch, targetsFiles, false);
-            cv::glob(texturesPath + "/" + settings.kfRGBMatch, texturesFiles, false);
-        }else{
-            for( size_t i : kfIndexs ){
-                // [REQUIRE] ImageMagick
-                system( ("convert " + targetsFiles[i] + " -resize " + newResolution + "! " + targetsFiles[i]).c_str() );
-                system( ("convert " + texturesFiles[i] + " -resize " + newResolution + "! " + texturesFiles[i]).c_str() );
-            }
-        }
-
-        // do iterations
-        int iter_count = 50 - scale * 5;
-        for ( int _count = 0; _count < iter_count; _count++) {
-            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]");
-            calcPatchmatch();
-            generateTargets();
-            generateTextures();
-        }
-
-        // save results
-        std::string texturesResultPath = resultsPath + "/" + newResolution;
-        EAGLE::checkPath(texturesResultPath);
-        for( size_t i : kfIndexs ){
-            system( ("cp " + texturesFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "M_", "."+settings.rgbNameExt)).c_str() );
-            system( ("cp " + targetsFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "T_", "."+settings.rgbNameExt)).c_str() );
-        }
-        LOG( "[ Results Saving Success ]" );
-    }
+    // init remappings
+    calcVertexMapping();
+    LOG("[ Init Success. " + std::to_string(kfIndexs.size()) + " / " + std::to_string(kfTotal) + " Images " + "]");
+    doIterations();
     LOG( "[ End ]" );
-    //log.close();
+}
+getAlignResults::~getAlignResults()
+{
+    log.close();
+
+    sourcesImgs.clear();
+    targetsImgs.clear();
+    texturesImgs.clear();
+
+    weights.clear();
+    for( size_t t : kfIndexs ) {
+        uvs[t].clear();
+        mappings[t].clear();
+    }
+    uvs.clear();
+    mappings.clear();
 }
 
 /*----------------------------------------------
@@ -225,6 +163,10 @@ bool getAlignResults::pointValid(cv::Point2i p_img)
         return false;
     return true;
 }
+bool getAlignResults::pointValid(cv::Point2f p_img)
+{
+    pointValid( cv::Point2i( round(p_img.x), round(p_img.y)) );
+}
 
 // apply the scale to the point p (p is on the origin-resolution img)
 cv::Point2i getAlignResults::imgToScale(cv::Point2i p_img)
@@ -245,10 +187,19 @@ cv::Point2i getAlignResults::scaleToImg(cv::Point2i p_img_s)
 }
 
 /*----------------------------------------------
- *  Vertex Info
+ *  Remapping
  * ---------------------------------------------*/
-void getAlignResults::calcVertexInfo()
+void getAlignResults::calcVertexMapping()
 {
+    // read the camera's world positions of keyframes
+    LOG("[ Read Camera Matrixs ] ");
+    readCameraTraj(settings.kfCameraTxtFile);
+
+    // read the model with mesh
+    LOG("[ Read PLY Model ] ");
+    //pcl::PolygonMesh mesh;
+    pcl::io::loadPLYFile(settings.plyWorldFile, mesh);
+
     // create a RGB point cloud
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);
     // convert to PointCloud
@@ -290,7 +241,7 @@ void getAlignResults::calcVertexInfo()
             cv::Mat X_img = projectToImg(X_w, t);
             uvs[t][i] = cv::Point2f(X_img.at<float>(0), X_img.at<float>(1));
         }
-
+        // record the min d
         float d2 = X_w.at<float>(0) * X_w.at<float>(0) + X_w.at<float>(1) * X_w.at<float>(1) + X_w.at<float>(2) * X_w.at<float>(2);
         if( d2 < d2_min )
             d2_min = d2;
@@ -314,6 +265,24 @@ void getAlignResults::calcVertexInfo()
         LOG( std::to_string(t) + " ", false );
     }
     LOG( "<< Done" );
+
+    // do remapping
+    //std::map<size_t, std::map<size_t, cv::Mat>> mappings;
+    mappings.clear();
+    // for every triangle mesh, do projection from i to j
+    LOG("[ Image Remapping ]");
+    for( size_t img_i : kfIndexs) {
+        mappings[img_i] = std::map<size_t, cv::Mat>();
+        LOG( " " + std::to_string(img_i) + " to ", false );
+        for( size_t img_j : kfIndexs ) {
+            if( img_i != img_j ) {
+                mappings[img_i][img_j] = cv::Mat3i( cv::Size(settings.originImgW, settings.originImgH) );
+                calcImgMapping(img_i, img_j);
+            }
+            LOG( std::to_string(img_j) + " ", false );
+        }
+        LOG( "<< Done" );
+    }
 }
 
 void getAlignResults::calcImgWeight(size_t img_i, std::vector<float> vertex_weight)
@@ -381,36 +350,13 @@ cv::Mat3f getAlignResults::calcPosCoord(cv::Point2f uv1, cv::Point2f uv2, cv::Po
     return lamdas;
 }
 
-/*----------------------------------------------
- *  Remapping
- * ---------------------------------------------*/
-void getAlignResults::doRemapping()
-{
-    // init mapping
-    //std::map<size_t, std::map<size_t, cv::Mat>> mappings;
-    mappings.clear();
-    // for every triangle mesh, do projection from i to j
-    LOG("[ Image Remapping ]");
-    for( size_t img_i : kfIndexs) {
-        mappings[img_i] = std::map<size_t, cv::Mat>();
-        LOG( " " + std::to_string(img_i) + " to ", false );
-        for( size_t img_j : kfIndexs ) {
-            if( img_i != img_j ) {
-                mappings[img_i][img_j] = cv::Mat3i( cv::Size(settings.originImgW, settings.originImgH) );
-                calcImgMapping(img_i, img_j);
-            }
-            LOG( std::to_string(img_j) + " ", false );
-        }
-        LOG( "<< Done" );
-    }
-}
 void getAlignResults::calcImgMapping(size_t img_i, size_t img_j)
 {
 #pragma omp parallel for
     for( size_t i = 0; i < mesh.polygons.size(); i++ ) {
-        size_t p1 = mesh.polygons[img_i].vertices[0];
-        size_t p2 = mesh.polygons[img_i].vertices[1];
-        size_t p3 = mesh.polygons[img_i].vertices[2];
+        size_t p1 = mesh.polygons[i].vertices[0];
+        size_t p2 = mesh.polygons[i].vertices[1];
+        size_t p3 = mesh.polygons[i].vertices[2];
 
         cv::Point2f i_uv1 = uvs[img_i][p1];
         cv::Point2f i_uv2 = uvs[img_i][p2];
@@ -422,21 +368,102 @@ void getAlignResults::calcImgMapping(size_t img_i, size_t img_j)
 
         cv::Rect pos(0,0,0,0);
         cv::Mat3d lamdas = calcPosCoord(i_uv1, i_uv2, i_uv3, pos);
+
         int total = pos.width * pos.height;
         for ( int index = 0; index < total; index++ ) {
             int dy = index / pos.width;
             int dx = index % pos.width;
             cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
-            if( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ){
+            cv::Point2i p_img_i( round(pos.x + dx), round(pos.y + dy) );
+            if( pointValid(p_img_i) && lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ){
                 // get new coord on img_j
                 int x_new = std::round( j_uv1.x * lamda(0) + j_uv2.x * lamda(1) + j_uv3.x * lamda(2) ) - 1;
                 int y_new = std::round( j_uv1.y * lamda(0) + j_uv2.y * lamda(1) + j_uv3.y * lamda(2) ) - 1;
-                mappings[img_i][img_j].at<cv::Vec3i>(pos.y + dy, pos.x + dx) = cv::Vec3i(x_new, y_new, 1);
-            } else {
-                if( mappings[img_i][img_j].at<cv::Vec3i>(pos.y + dy, pos.x + dx)(2) != 1 )
-                    mappings[img_i][img_j].at<cv::Vec3i>(pos.y + dy, pos.x + dx)(2) = 0;
+                mappings[img_i][img_j].at<cv::Vec3i>(p_img_i.y, p_img_i.x) = cv::Vec3i(x_new, y_new, 1);
             }
         }
+    }
+}
+
+/*----------------------------------------------
+ *  Do Iterations
+ * ---------------------------------------------*/
+void getAlignResults::doIterations()
+{
+    int scale = 0;
+    std::vector<cv::String> originSourcesFiles(sourcesFiles); // origin sources
+    for ( ; scale < settings.scaleTimes; scale++) {
+        // downsample imgs
+        settings.imgW = round(settings.scaleInitW * pow(settings.scaleFactor, scale));
+        settings.imgH = round(settings.scaleInitH * pow(settings.scaleFactor, scale));
+        scaleF = pow(settings.scaleFactor, settings.scaleTimes-1-scale);
+
+        char tmp[10];
+        sprintf(tmp, "%dx%d", settings.imgW, settings.imgH);
+        std::string newResolution(tmp);
+        LOG("[ Scale to " + newResolution + " ]");
+
+        // get all keyframes' full path (after scale)
+        sourcesPath = settings.keyFramesPath + "/" + newResolution;
+        EAGLE::checkPath(sourcesPath);
+        // generate source imgs with new resolution // [REQUIRE] ImageMagick
+        for( size_t i = 0; i < kfTotal; i++ )
+            system( ("convert " + originSourcesFiles[i] + " -resize " + newResolution + "! " + getImgFile(i)).c_str() );
+        cv::glob(sourcesPath + "/" + settings.kfRGBMatch, sourcesFiles, false);
+        // read Si
+        sourcesImgs.clear();
+        for ( size_t i = 0; i < kfTotal; i++ )
+            sourcesImgs.push_back( cv::imread(sourcesFiles[i]) ); // img.at<cv::Vec3b>(y, x)(0)
+
+        // init Ti and Mi or upsample
+        if ( targetsFiles.size() == 0 ) {
+            for( size_t i = 0; i < kfTotal; i++ ) {
+                system( ("cp " + sourcesFiles[i] + " " + targetsPath+"/").c_str() );
+                system( ("cp " + sourcesFiles[i] + " " + texturesPath+"/").c_str() );
+            }
+            cv::glob(targetsPath + "/" + settings.kfRGBMatch, targetsFiles, false);
+            cv::glob(texturesPath + "/" + settings.kfRGBMatch, texturesFiles, false);
+        }else{
+            for( size_t i : kfIndexs ){
+                // [REQUIRE] ImageMagick
+                system( ("convert " + targetsFiles[i] + " -resize " + newResolution + "! " + targetsFiles[i]).c_str() );
+                system( ("convert " + texturesFiles[i] + " -resize " + newResolution + "! " + texturesFiles[i]).c_str() );
+            }
+        }
+
+        if( ! OUTPUT_T_M_INSTANT) {
+            targetsImgs.clear();
+            texturesImgs.clear();
+            for( size_t i = 0; i < kfTotal; i++ ) {
+                targetsImgs.push_back( cv::imread(targetsFiles[i]) );
+                texturesImgs.push_back( cv::imread(texturesFiles[i]) );
+            }
+        }
+        // do iterations
+        int iter_count = 50 - scale * 5;
+        for ( int _count = 0; _count < iter_count; _count++) {
+            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]");
+            calcPatchmatch();
+            generateTargets();
+            generateTextures();
+        }
+        if( ! OUTPUT_T_M_INSTANT) {
+            for( size_t i : kfIndexs ){
+                cv::imwrite( targetsFiles[i], targetsImgs[i] );
+                cv::imwrite( texturesFiles[i], texturesImgs[i] );
+            }
+        }
+
+        // save results
+        std::string texturesResultPath = resultsPath + "/" + newResolution;
+        EAGLE::checkPath(texturesResultPath);
+        for( size_t i : kfIndexs ){
+            system( ("cp " + texturesFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "M_", "."+settings.rgbNameExt)).c_str() );
+            system( ("cp " + targetsFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "T_", "."+settings.rgbNameExt)).c_str() );
+        }
+        if( scale == settings.scaleTimes - 1 )
+            generateColoredPLY(texturesResultPath);
+        LOG( "[ Results at " + newResolution + " Saving Success ]" );
     }
 }
 
@@ -512,9 +539,11 @@ void getAlignResults::generateTargets()
 {
     if(LOG_SAVE_T)
         LOG( " Targets << ", false );
-    texturesImgs.clear();
-    for( size_t i = 0; i < kfTotal; i++ )
-        texturesImgs.push_back( cv::imread(texturesFiles[i]) );
+    if(OUTPUT_T_M_INSTANT){
+        texturesImgs.clear();
+        for( size_t i = 0; i < kfTotal; i++ )
+            texturesImgs.push_back( cv::imread(texturesFiles[i]) );
+    }
     for( size_t i : kfIndexs ) {
         generateTargetI(i, texturesImgs);
         if(LOG_SAVE_T)
@@ -525,6 +554,9 @@ void getAlignResults::generateTargets()
 }
 void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> textures)
 {
+    int total = settings.imgH * settings.imgW;
+    cv::Mat3b target( cv::Size(settings.imgW, settings.imgH) );
+
     // similarity term
     std::string sourceFile = getImgFile( target_id );
     std::string ann_txt = pmResultPath + "/" + getAnnFilename(sourceFile, "s2t.txt");
@@ -536,21 +568,19 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
 
     cv::Mat4i result_su( cv::Size(settings.imgW, settings.imgH) );
     cv::Mat4i result_sv( cv::Size(settings.imgW, settings.imgH) );
-    for( int j = 0 ; j < settings.imgH; j++ ){
-        for( int i = 0; i < settings.imgW; i++ ){
-            result_su.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
-            result_sv.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
-        }
-    }
-    getSimilarityTerm(sourcesImgs[target_id], result_ann_s2t, result_ann_t2s, result_su, result_sv);
-
-    cv::Mat3b target( cv::Size(settings.imgW, settings.imgH) );
-    int total = settings.imgH * settings.imgW;
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
+        result_su.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
+        result_sv.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
+    }
+    getSimilarityTerm(sourcesImgs[target_id], result_ann_s2t, result_ann_t2s, result_su, result_sv);
 
+#pragma omp parallel for
+    for ( int index = 0; index < total; index++) {
+        int j = index / settings.imgW;
+        int i = index % settings.imgW;
         cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
         double weightJ = weights[target_id].at<float>(p_img.y, p_img.x);
 
@@ -583,7 +613,11 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         }
         target.at<cv::Vec3b>(j, i) = bgr;
     }
-    cv::imwrite( targetsFiles[target_id], target );
+    if(OUTPUT_T_M_INSTANT) {
+        cv::imwrite( targetsFiles[target_id], target );
+    } else {
+        targetsImgs[target_id] = target;
+    }
 }
 
 void getAlignResults::getSimilarityTerm(cv::Mat3b S, cv::Mat1i ann_s2t, cv::Mat1i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv)
@@ -634,9 +668,11 @@ void getAlignResults::generateTextures()
 {
     if(LOG_SAVE_M)
         LOG( " Textures << ", false );
-    targetsImgs.clear();
-    for( size_t i = 0; i < kfTotal; i++ )
-       targetsImgs.push_back( cv::imread(targetsFiles[i]) );
+    if(OUTPUT_T_M_INSTANT) {
+        targetsImgs.clear();
+        for( size_t i = 0; i < kfTotal; i++ )
+           targetsImgs.push_back( cv::imread(targetsFiles[i]) );
+    }
     for( size_t i : kfIndexs ) {
         generateTextureI(i, targetsImgs);
         if(LOG_SAVE_M)
@@ -684,5 +720,44 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
         texture.at<cv::Vec3b>(j, i)(1) = round( sum_g / sum_w );
         texture.at<cv::Vec3b>(j, i)(2) = round( sum_r / sum_w );
     }
-    cv::imwrite( texturesFiles[texture_id], texture );
+    if(OUTPUT_T_M_INSTANT) {
+        cv::imwrite( texturesFiles[texture_id], texture );
+    } else {
+        texturesImgs[texture_id] = texture;
+    }
 }
+
+void getAlignResults::generateColoredPLY(std::string path)
+{
+    // create a RGB point cloud
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);
+    // convert to PointCloud
+    pcl::fromPCLPointCloud2(mesh.cloud, *cloud_rgb);
+
+    for( size_t i = 0; i < cloud_rgb->points.size(); i++) {
+        cv::Vec3i pixel_sum(0,0,0);
+        int count = 0;
+        for( size_t img_t : kfIndexs ) {
+            cv::Point2f p_img = uvs[img_t][i];
+            if( pointValid(p_img) ) {
+                cv::Vec3b pixel = targetsImgs[img_t].at<cv::Vec3b>( round(p_img.y), round(p_img.x));
+                pixel_sum += pixel;
+                count += 1;
+            }
+        }
+        if ( count > 0 ) {
+            cloud_rgb->points[i].b = pixel_sum(0) * 1.0 / count;
+            cloud_rgb->points[i].g = pixel_sum(1) * 1.0 / count;
+            cloud_rgb->points[i].r = pixel_sum(2) * 1.0 / count;
+        }
+    }
+    // convert to mesh
+    pcl::toPCLPointCloud2(*cloud_rgb, mesh.cloud);
+    pcl::io::savePLYFile( path + "/" + settings.plyTColorFilename, mesh );
+}
+
+/*----------------------------------------------
+ *  Generate UV Map for the Mesh
+ * ---------------------------------------------*/
+//void getAlignResults::genereteUVMaps()
+//{}

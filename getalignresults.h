@@ -9,7 +9,6 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-#include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
@@ -17,7 +16,6 @@
 #include <pcl/features/normal_3d.h>
 #include <pcl/PolygonMesh.h>
 #include <pcl/conversions.h>
-//#include <pcl/visualization/pcl_visualizer.h>
 
 #include "settings.h"
 #include "Eagle_Utils.h"
@@ -38,17 +36,16 @@ public:
     std::string resultsPath; // save results with different resolutions
     std::string pmResultPath; // path to store patchmatch results
 
+    double scaleF;
+    size_t kfStart, kfTotal;
+    std::vector<size_t> kfIndexs;
     std::vector<cv::String> sourcesFiles; // all sources' full path (with filename and ext)
     std::vector<cv::String> targetsFiles;
     std::vector<cv::String> texturesFiles;
-    size_t kfStart, kfTotal;
-    std::vector<size_t> kfIndexs;
 
     std::vector<cv::Mat3b> sourcesImgs;
     std::vector<cv::Mat3b> targetsImgs;
     std::vector<cv::Mat3b> texturesImgs;
-
-    double scaleF;
 
     pcl::PolygonMesh mesh;
     std::map<size_t, std::vector<cv::Point2f>> uvs;
@@ -56,6 +53,7 @@ public:
     std::map<size_t, std::map<size_t, cv::Mat>> mappings;
 
     getAlignResults(Settings &_settings);
+    ~getAlignResults();
     void LOG(std::string t, bool nl = true);
 
     std::string getImgFile(size_t img_i);
@@ -63,15 +61,17 @@ public:
 
     void readCameraTraj(std::string camTraj_file);
     cv::Mat projectToImg(cv::Mat X_w, size_t id);
+    bool pointValid(cv::Point2f p_img);
     bool pointValid(cv::Point2i p_img);
     cv::Point2i imgToScale(cv::Point2i p_img);
     cv::Point2i scaleToImg(cv::Point2i p_img_s);
 
-    void calcVertexInfo();
+    void calcVertexMapping();
     void calcImgWeight(size_t img_i, std::vector<float> vertex_weight);
-    void doRemapping();
     void calcImgMapping(size_t img_i, size_t img_j);
     cv::Mat3f calcPosCoord(cv::Point2f uv1, cv::Point2f uv2, cv::Point2f uv3, cv::Rect &pos);
+
+    void doIterations();
 
     void calcPatchmatch();
     void patchMatch(std::string imgA_file, std::string imgB_file, std::string ann_raw_file, std::string annd_file);
@@ -87,6 +87,7 @@ public:
     void generateTextures();
     void generateTextureI(size_t texture_id, std::vector<cv::Mat3b> targets);
 
+    void generateColoredPLY(std::string path);
 };
 
 #endif // GETALIGNRESULTS_H

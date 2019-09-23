@@ -70,7 +70,7 @@ public:
         //   weight the similarity from Ti to Si
         alpha = 2;
         //   weight how much Mi affects Ti
-        lambda = 0.5;//0.1;
+        lambda = 0.1;//0.1;
 
         // -----------------
         //  custom
@@ -196,7 +196,7 @@ public:
         cameraCx = 639.5f;
         cameraCy = 511.5f;
 
-        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full";
+        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full2";
         rgbNameExt = "jpg";
         rgbNamePattern = "%05d." + rgbNameExt;
         dNamePattern = "%05d.png";
@@ -206,7 +206,7 @@ public:
         kfDNamePattern = "%05d.png";
         kfDMatch = "*.png";
 
-        kfIndexs = {0,3,4,6,7,13,15,17,19,21};
+        kfIndexs = {0,4,6,7,13,17,19,21};
     }
 };
 
