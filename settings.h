@@ -11,7 +11,7 @@ class Settings
 public:
     int originImgW, originImgH, imgW, imgH, patchWidth, patchSize;
     int frameStart, frameEnd, scaleTimes;
-    double scaleFactor, scaleInitW, scaleInitH, alpha, lambda;
+    double scaleFactor, scaleInitW, scaleInitH, alpha_u, alpha_v, lambda;
     float volumeSize;
 
     std::string allFramesPath, cameraTxtFile;
@@ -67,15 +67,16 @@ public:
         patchWidth = 5;//7;
 
         // energy function's parameters
+        alpha_u = 0.8;//1;
         //   weight the similarity from Ti to Si
-        alpha = 2;
+        alpha_v = 0.4;//2;
         //   weight how much Mi affects Ti
-        lambda = 0.1;//0.1;
+        lambda = 0.4;//0.1;
 
         // -----------------
         //  custom
         // -----------------
-//        init_zhou();
+        init_zhou();
 
         // -----------------
         //  init
@@ -84,16 +85,17 @@ public:
         patchmatchBinFile = "/home/wsy/TextureRecover/patchmatch-2.1/eagle_pm_minimal";
 
         // scale
-        int x = originImgW;
-        if( x > originImgH )
-            x = originImgH;
-        scaleTimes = 4;
-        scaleFactor = 2;
-        scaleInitW = 80;
-        scaleInitH = 60;
+        scaleTimes = 10;
+        scaleFactor = pow( originImgH / 64.0, 1.0 / 9 );
+        scaleInitW = originImgW * 1.0 / originImgH * 64;
+        scaleInitH = 64;
+//        scaleTimes = 4;
+//        scaleFactor = 2;
+//        scaleInitW = 80;
+//        scaleInitH = 60;
 //        scaleTimes = 5;
-//        scaleFactor = 2;//pow( x / 64.0, 1.0 / 9 );
-//        scaleInitW = 80;//originImgW * 1.0 / originImgH * 64;
+//        scaleFactor = 2;
+//        scaleInitW = 80;
 //        scaleInitH = 64;
 
         // make the dir
@@ -131,62 +133,6 @@ public:
         imgH = originImgH;
     }
 
-    void init_meeting_small_1(){
-        cameraFx = 570.3f;
-        cameraFy = 570.3f;
-        cameraCx = 320.0f;
-        cameraCy = 240.0f;
-
-        allFramesPath = "/home/wsy/TextureRecover/rgbd-scenes/meeting_small/meeting_small_1";
-        keyFramesPath = "/home/wsy/TextureRecover/Results/meeting_small_1";
-        rgbNameExt = "png";
-        rgbNamePattern = "meeting_small_1_%d." + rgbNameExt;
-        dNamePattern = "meeting_small_1_%d_depth.png";
-        frameStart = 5;
-        frameEnd = 180;
-
-        kfRGBNamePattern = "%03d_rgb." + rgbNameExt;
-        kfRGBMatch = "*_rgb*" + rgbNameExt;
-    }
-
-    void init_table_small_1(){
-        cameraFx = 570.3f;
-        cameraFy = 570.3f;
-        cameraCx = 320.0f;
-        cameraCy = 240.0f;
-
-        allFramesPath = "/home/wsy/TextureRecover/rgbd-scenes/table_small/table_small_1";
-        keyFramesPath = "/home/wsy/TextureRecover/Results/table_small_1";
-        rgbNameExt = "png";
-        rgbNamePattern = "table_small_1_%d." + rgbNameExt;
-        dNamePattern = "table_small_1_%d_depth.png";
-        frameStart = 15;
-        frameEnd = 145;
-
-        kfRGBNamePattern = "%03d_rgb." + rgbNameExt;
-        kfRGBMatch = "*_rgb*" + rgbNameExt;
-    }
-
-    void init_toy(){
-        originImgW = 480;
-        originImgH = 640;
-
-        cameraFx = 494.02698f;
-        cameraFy = 494.78205f;
-        cameraCx = 239.49163f;
-        cameraCy = 317.96980f;
-
-        keyFramesPath = "/home/wsy/TextureRecover/Results/toy";
-        rgbNameExt = "jpg";
-        rgbNamePattern = "color_%02d." + rgbNameExt;
-        dNamePattern = "depth_%02d.png";
-
-        kfRGBNamePattern = "color_%02d." + rgbNameExt;
-        kfRGBMatch = "color_*" + rgbNameExt;
-        kfDNamePattern = "depth_%02d.png";
-        kfDMatch = "depth_*.png";
-    }
-
     void init_zhou(){
         originImgW = 1280;
         originImgH = 1024;
@@ -196,7 +142,7 @@ public:
         cameraCx = 639.5f;
         cameraCy = 511.5f;
 
-        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full";
+        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full2";
         rgbNameExt = "jpg";
         rgbNamePattern = "%05d." + rgbNameExt;
         dNamePattern = "%05d.png";
@@ -206,7 +152,7 @@ public:
         kfDNamePattern = "%05d.png";
         kfDMatch = "*.png";
 
-        kfIndexs = {0,4,6,7,13,17,19,21};
+        kfIndexs = {0,6,13};//{0,4,6,13,17,19,21};
     }
 };
 

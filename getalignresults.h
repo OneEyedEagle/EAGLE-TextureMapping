@@ -48,7 +48,8 @@ public:
     std::vector<cv::Mat3b> texturesImgs;
 
     pcl::PolygonMesh mesh;
-    std::map<size_t, std::vector<cv::Point2f>> uvs;
+    std::map<size_t, std::vector<cv::Point3f>> uvs;
+    std::map<size_t, cv::Mat> img_valid_mesh;
     std::map<size_t, cv::Mat> weights;
     std::map<size_t, std::map<size_t, cv::Mat>> mappings;
 
@@ -60,6 +61,7 @@ public:
     std::string getImgFilename(size_t img_i, std::string pre, std::string ext);
 
     void readCameraTraj(std::string camTraj_file);
+    cv::Mat projectToCamera(cv::Mat X_w, size_t id);
     cv::Mat projectToImg(cv::Mat X_w, size_t id);
     bool pointValid(cv::Point2f p_img);
     bool pointValid(cv::Point2i p_img);
@@ -68,8 +70,9 @@ public:
 
     void calcVertexMapping();
     void calcImgWeight(size_t img_i, std::vector<float> vertex_weight);
-    void calcImgMapping(size_t img_i, size_t img_j);
-    cv::Mat3f calcPosCoord(cv::Point2f uv1, cv::Point2f uv2, cv::Point2f uv3, cv::Rect &pos);
+    void calcImgValidMesh(size_t img_i);
+    void calcRemapping(size_t img_i, size_t img_j);
+    cv::Mat3f calcPosCoord(cv::Point3f uv1, cv::Point3f uv2, cv::Point3f uv3, cv::Rect &pos);
 
     void doIterations();
 
