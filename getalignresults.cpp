@@ -814,7 +814,6 @@ void getAlignResults::generateColoredPLY(std::string path)
             size_t p = mesh.polygons[i].vertices[pi];
             cv::Vec3i pixel_sum(0,0,0);
             int count = 0;
-            std::cout << 11 << std::endl;
             for ( size_t t : kfIndexs ) {
                 cv::Point3f pi_uv = uvs[t][p];
                 cv::Point2i p_img(std::round(pi_uv.x), std::round(pi_uv.y));
