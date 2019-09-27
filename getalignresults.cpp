@@ -59,10 +59,15 @@ getAlignResults::getAlignResults(Settings &_settings)
     // make the dir to store pm's results
     pmResultPath = sourcesPath + "/patchmatchs";
     EAGLE::checkPath(pmResultPath);
+    // read the model with mesh
+    LOG("[ Read PLY Model ] ");
+    //pcl::PolygonMesh mesh;
+    pcl::io::loadPLYFile(settings.plyWorldFile, mesh);
     // init remappings
     calcVertexMapping();
     LOG("[ Init Success. " + std::to_string(kfIndexs.size()) + " / " + std::to_string(kfTotal) + " Images " + "]");
     doIterations();
+    generateColoredPLY(resultsPath);
     LOG( "[ End ]" );
 }
 getAlignResults::~getAlignResults()
@@ -200,11 +205,6 @@ void getAlignResults::calcVertexMapping()
     LOG("[ Read Camera Matrixs ] ");
     readCameraTraj(settings.kfCameraTxtFile);
 
-    // read the model with mesh
-    LOG("[ Read PLY Model ] ");
-    //pcl::PolygonMesh mesh;
-    pcl::io::loadPLYFile(settings.plyWorldFile, mesh);
-
     // create a RGB point cloud
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);
     // convert to PointCloud
@@ -278,7 +278,7 @@ void getAlignResults::calcVertexMapping()
 
     // calculate valid mesh for each pixel on every image
     LOG("[ Calculating valid mesh of every pixel on each Si ]");
-    //std::map<size_t, cv::Mat3i> img_valid_mesh;
+    //std::map<size_t, cv::Mat> img_valid_mesh;
     img_valid_mesh.clear();
     LOG( " Valid Mesh << ", false );
     for( size_t t : kfIndexs ) {
@@ -461,7 +461,8 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
  * ---------------------------------------------*/
 void getAlignResults::doIterations()
 {
-    int scale = 0;//settings.scaleTimes-1;
+//    int scale = settings.scaleTimes-1;
+    int scale = 0;
     std::vector<cv::String> originSourcesFiles(sourcesFiles); // origin sources
     for ( ; scale < settings.scaleTimes; scale++) {
         // downsample imgs
@@ -511,7 +512,7 @@ void getAlignResults::doIterations()
             }
         }
         // do iterations
-        int iter_count = 50 - scale * 5;
+        int iter_count = 100 - scale * 5;
         for ( int _count = 0; _count < iter_count; _count++) {
             LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]");
             calcPatchmatch();
@@ -532,8 +533,6 @@ void getAlignResults::doIterations()
             system( ("cp " + texturesFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "M_", "."+settings.rgbNameExt)).c_str() );
             system( ("cp " + targetsFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "T_", "."+settings.rgbNameExt)).c_str() );
         }
-        if( scale == settings.scaleTimes - 1 )
-            generateColoredPLY(resultsPath);
         LOG( "[ Results at " + newResolution + " Saving Success ]" );
     }
 }
@@ -800,6 +799,11 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
 
 void getAlignResults::generateColoredPLY(std::string path)
 {
+    cv::glob(targetsPath + "/" + settings.kfRGBMatch, targetsFiles, false);
+    targetsImgs.clear();
+    for( size_t i = 0; i < kfTotal; i++ )
+       targetsImgs.push_back( cv::imread(targetsFiles[i]) );
+
     // create a RGB point cloud
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);
     // convert to PointCloud
@@ -810,10 +814,11 @@ void getAlignResults::generateColoredPLY(std::string path)
             size_t p = mesh.polygons[i].vertices[pi];
             cv::Vec3i pixel_sum(0,0,0);
             int count = 0;
+            std::cout << 11 << std::endl;
             for ( size_t t : kfIndexs ) {
                 cv::Point3f pi_uv = uvs[t][p];
                 cv::Point2i p_img(std::round(pi_uv.x), std::round(pi_uv.y));
-                if ( img_valid_mesh[t].at<cv::Vec2i>(p_img.y, p_img.x)(0) == i ) {
+                if ( pointValid(p_img) && img_valid_mesh[t].at<cv::Vec2i>(p_img.y, p_img.x)(0) == i ) {
                     cv::Vec3b pixel = targetsImgs[t].at<cv::Vec3b>(p_img.y, p_img.x);
                     pixel_sum += pixel;
                     count += 1;

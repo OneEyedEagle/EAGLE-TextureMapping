@@ -67,11 +67,11 @@ public:
         patchWidth = 5;//7;
 
         // energy function's parameters
-        alpha_u = 0.8;//1;
+        alpha_u = 0.5;//1;
         //   weight the similarity from Ti to Si
-        alpha_v = 0.4;//2;
+        alpha_v = 0.5;//2;
         //   weight how much Mi affects Ti
-        lambda = 0.4;//0.1;
+        lambda = 0.3;//0.1;
 
         // -----------------
         //  custom
@@ -152,7 +152,7 @@ public:
         kfDNamePattern = "%05d.png";
         kfDMatch = "*.png";
 
-        kfIndexs = {0,6,13};//{0,4,6,13,17,19,21};
+        kfIndexs = {0,6,13,15,21};//{0,4,6,13,17,19,21};
     }
 };
 
