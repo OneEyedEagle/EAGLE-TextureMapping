@@ -254,10 +254,18 @@ void getAlignResults::calcVertexMapping()
 #pragma omp parallel for
     for(size_t i = 0; i < point_num; i++) {
         cv::Mat X_w = (cv::Mat_<float>(4, 1) << cloud_rgb->points[i].x, cloud_rgb->points[i].y, cloud_rgb->points[i].z, 1);
+        cv::Mat D_i = (cv::Mat_<float>(4, 1) << 0,0,1,0);
+        cv::Vec3f V_N = vertex_normal[i];
         for( size_t t : kfIndexs ) {
+            // get the camera's direction vector
+            cv::Mat D = projectToCamera(D_i, t);
+            cv::Vec3f V_D = cv::Vec3f(D.at<float>(0), D.at<float>(1), D.at<float>(2));
+            float cos_theta2 = V_N(0) * V_D(0) + V_N(1) * V_D(1) + V_N(2) * V_D(2);
+            cos_theta2 = cos_theta2 * cos_theta2 / (V_N(0)*V_N(0)+V_N(1)*V_N(1)+V_N(2)*V_N(2)) / (V_D(0)*V_D(0)+V_D(1)*V_D(1)+V_D(2)*V_D(2));
+            // get the vertex's relative position
             cv::Mat X_c = projectToCamera(X_w, t);
             float d2 = X_c.at<float>(0) * X_c.at<float>(0) + X_c.at<float>(1) * X_c.at<float>(1) + X_c.at<float>(2) * X_c.at<float>(2);
-            vertex_weight[t][i] = vertex_normal[i](2) * vertex_normal[i](2) / d2;
+            vertex_weight[t][i] = cos_theta2 / d2;
         }
     }
 

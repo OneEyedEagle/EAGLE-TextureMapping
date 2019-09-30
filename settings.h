@@ -89,10 +89,6 @@ public:
         scaleFactor = pow( originImgH / 64.0, 1.0 / 9 );
         scaleInitW = originImgW * 1.0 / originImgH * 64;
         scaleInitH = 64;
-//        scaleTimes = 4;
-//        scaleFactor = 2;
-//        scaleInitW = 80;
-//        scaleInitH = 60;
 //        scaleTimes = 5;
 //        scaleFactor = 2;
 //        scaleInitW = 80;
