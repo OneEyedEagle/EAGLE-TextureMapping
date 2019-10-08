@@ -36,7 +36,6 @@ public:
     std::string resultsPath; // save results with different resolutions
     std::string pmResultPath; // path to store patchmatch results
 
-    double scaleF;
     size_t kfStart, kfTotal;
     std::vector<size_t> kfIndexs;
     std::vector<cv::String> sourcesFiles; // all sources' full path (with filename and ext)
@@ -52,6 +51,10 @@ public:
     std::map<size_t, cv::Mat> img_valid_mesh;
     std::map<size_t, cv::Mat> weights;
     std::map<size_t, std::map<size_t, cv::Mat>> mappings;
+
+    double scaleF;
+    double E1, E2;
+    double lamda;
 
     getAlignResults(Settings &_settings);
     ~getAlignResults();

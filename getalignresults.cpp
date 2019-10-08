@@ -29,9 +29,6 @@
 getAlignResults::getAlignResults(Settings &_settings)
 {
     settings = _settings;
-    LOG("[ From Path: " + settings.keyFramesPath + " ] ");
-    LOG("[ Alpha U: " + std::to_string(settings.alpha_u) + " Alpha V: " + std::to_string(settings.alpha_v) + " Lambda: " + std::to_string(settings.lambda) + " ] ");
-
     // get all keyframe imgs' full path
     sourcesPath = settings.keyFramesPath;
     EAGLE::checkPath(sourcesPath);
@@ -59,6 +56,8 @@ getAlignResults::getAlignResults(Settings &_settings)
     // make the dir to store pm's results
     pmResultPath = sourcesPath + "/patchmatchs";
     EAGLE::checkPath(pmResultPath);
+    LOG("[ From Path: " + settings.keyFramesPath + " ] ");
+    LOG("[ Alpha U: " + std::to_string(settings.alpha_u) + " Alpha V: " + std::to_string(settings.alpha_v) + " Lambda: " + std::to_string(settings.lamda) + " ] ");
     // read the model with mesh
     LOG("[ Read PLY Model ] ");
     //pcl::PolygonMesh mesh;
@@ -246,6 +245,21 @@ void getAlignResults::calcVertexMapping()
         }
     }
 
+    // calculate valid mesh for each pixel on every image
+    LOG("[ Calculating valid mesh of every pixel on each Si ]");
+    //std::map<size_t, cv::Mat> img_valid_mesh;
+    img_valid_mesh.clear();
+    LOG( " Valid Mesh << ", false );
+    for( size_t t : kfIndexs ) {
+        img_valid_mesh[t] = cv::Mat2i( cv::Size(settings.originImgW, settings.originImgH) );
+        for( int i = 0; i < settings.originImgW; i++ )
+            for( int j = 0; j < settings.originImgH; j++ )
+                img_valid_mesh[t].at<cv::Vec2i>(j, i) = cv::Vec2i(-1, 0);
+        calcImgValidMesh(t);
+        LOG( std::to_string(t) + " ", false );
+    }
+    LOG( "<< Done" );
+
     // for each vertex, calculate its weight of each image
     LOG("[ Calculating Weight of each Vertex ]");
     std::map<size_t, std::vector<float>> vertex_weight;
@@ -260,8 +274,10 @@ void getAlignResults::calcVertexMapping()
             // get the camera's direction vector
             cv::Mat D = projectToCamera(D_i, t);
             cv::Vec3f V_D = cv::Vec3f(D.at<float>(0), D.at<float>(1), D.at<float>(2));
-            float cos_theta2 = V_N(0) * V_D(0) + V_N(1) * V_D(1) + V_N(2) * V_D(2);
-            cos_theta2 = cos_theta2 * cos_theta2 / (V_N(0)*V_N(0)+V_N(1)*V_N(1)+V_N(2)*V_N(2)) / (V_D(0)*V_D(0)+V_D(1)*V_D(1)+V_D(2)*V_D(2));
+            float d12  = V_N(0)*V_D(0)+V_N(1)*V_D(1)+V_N(2)*V_D(2);
+            float d1_2 = V_N(0)*V_N(0)+V_N(1)*V_N(1)+V_N(2)*V_N(2);
+            float d2_2 = V_D(0)*V_D(0)+V_D(1)*V_D(1)+V_D(2)*V_D(2);
+            float cos_theta2 = d12 * d12 / (d1_2 * d2_2);
             // get the vertex's relative position
             cv::Mat X_c = projectToCamera(X_w, t);
             float d2 = X_c.at<float>(0) * X_c.at<float>(0) + X_c.at<float>(1) * X_c.at<float>(1) + X_c.at<float>(2) * X_c.at<float>(2);
@@ -280,21 +296,6 @@ void getAlignResults::calcVertexMapping()
             for( int j = 0; j < settings.originImgH; j++ )
                 weights[t].at<float>(j, i) = 0;
         calcImgWeight(t, vertex_weight[t]);
-        LOG( std::to_string(t) + " ", false );
-    }
-    LOG( "<< Done" );
-
-    // calculate valid mesh for each pixel on every image
-    LOG("[ Calculating valid mesh of every pixel on each Si ]");
-    //std::map<size_t, cv::Mat> img_valid_mesh;
-    img_valid_mesh.clear();
-    LOG( " Valid Mesh << ", false );
-    for( size_t t : kfIndexs ) {
-        img_valid_mesh[t] = cv::Mat2i( cv::Size(settings.originImgW, settings.originImgH) );
-        for( int i = 0; i < settings.originImgW; i++ )
-            for( int j = 0; j < settings.originImgH; j++ )
-                img_valid_mesh[t].at<cv::Vec2i>(j, i) = cv::Vec2i(-1, 0);
-        calcImgValidMesh(t);
         LOG( std::to_string(t) + " ", false );
     }
     LOG( "<< Done" );
@@ -318,41 +319,6 @@ void getAlignResults::calcVertexMapping()
             LOG( std::to_string(img_j) + " ", false );
         }
         LOG( "<< Done" );
-    }
-}
-
-void getAlignResults::calcImgWeight(size_t img_i, std::vector<float> vertex_weight)
-{
-#pragma omp parallel for
-    for( size_t i = 0; i < mesh.polygons.size(); i++ ) {
-        size_t p1 = mesh.polygons[i].vertices[0];
-        size_t p2 = mesh.polygons[i].vertices[1];
-        size_t p3 = mesh.polygons[i].vertices[2];
-
-        cv::Point3f i_uv1 = uvs[img_i][p1];
-        cv::Point3f i_uv2 = uvs[img_i][p2];
-        cv::Point3f i_uv3 = uvs[img_i][p3];
-
-        float w1 = vertex_weight[p1];
-        float w2 = vertex_weight[p2];
-        float w3 = vertex_weight[p3];
-
-        cv::Rect pos(0,0,0,0);
-        cv::Mat3f lamdas = calcPosCoord(i_uv1, i_uv2, i_uv3, pos);
-        int total = pos.width * pos.height;
-        int dx, dy; float w;
-        for ( int index = 0; index < total; index++ ) {
-            dy = index / pos.width;
-            dx = index % pos.width;
-            cv::Point2i p_img( pos.x + dx, pos.y + dy );
-            if( ! pointValid(p_img) )
-                continue;
-            cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
-            if( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
-                w = w1*lamda(0) + w2*lamda(1) + w3*lamda(2);
-                weights[img_i].at<float>(p_img.y, p_img.x) = w;
-            }
-        }
     }
 }
 
@@ -428,6 +394,43 @@ void getAlignResults::calcImgValidMesh(size_t img_i)
     //std::cout << img_valid_z << std::endl;
 }
 
+void getAlignResults::calcImgWeight(size_t img_i, std::vector<float> vertex_weight)
+{
+#pragma omp parallel for
+    for( size_t i = 0; i < mesh.polygons.size(); i++ ) {
+        size_t p1 = mesh.polygons[i].vertices[0];
+        size_t p2 = mesh.polygons[i].vertices[1];
+        size_t p3 = mesh.polygons[i].vertices[2];
+
+        cv::Point3f i_uv1 = uvs[img_i][p1];
+        cv::Point3f i_uv2 = uvs[img_i][p2];
+        cv::Point3f i_uv3 = uvs[img_i][p3];
+
+        float w1 = vertex_weight[p1];
+        float w2 = vertex_weight[p2];
+        float w3 = vertex_weight[p3];
+
+        cv::Rect pos(0,0,0,0);
+        cv::Mat3f lamdas = calcPosCoord(i_uv1, i_uv2, i_uv3, pos);
+        int total = pos.width * pos.height;
+        int dx, dy; float w;
+        for ( int index = 0; index < total; index++ ) {
+            dy = index / pos.width;
+            dx = index % pos.width;
+            cv::Point2i p_img( pos.x + dx, pos.y + dy );
+            if( ! pointValid(p_img) )
+                continue;
+            cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
+            if( img_valid_mesh[img_i].at<cv::Vec2i>(p_img.y, p_img.x)(0) != i )
+                continue;
+            if( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
+                w = w1*lamda(0) + w2*lamda(1) + w3*lamda(2);
+                weights[img_i].at<float>(p_img.y, p_img.x) = w;
+            }
+        }
+    }
+}
+
 // for each pixel in img_i, remapping it to img_j only when the mesh is visible both in i and j
 void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
 {
@@ -471,6 +474,7 @@ void getAlignResults::doIterations()
 {
 //    int scale = settings.scaleTimes-1;
     int scale = 0;
+    lamda = settings.lamda;
     std::vector<cv::String> originSourcesFiles(sourcesFiles); // origin sources
     for ( ; scale < settings.scaleTimes; scale++) {
         // downsample imgs
@@ -520,12 +524,13 @@ void getAlignResults::doIterations()
             }
         }
         // do iterations
-        int iter_count = 100 - scale * 5;
+        int iter_count = 80 - scale * 5;
         for ( int _count = 0; _count < iter_count; _count++) {
-            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]");
+            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]" + " lamda: " + std::to_string(lamda));
             calcPatchmatch();
             generateTargets();
             generateTextures();
+//            lamda = E1 / E2;
         }
         if( ! OUTPUT_T_M_INSTANT) {
             for( size_t i : kfIndexs ){
@@ -553,9 +558,9 @@ void getAlignResults::calcPatchmatch()
     if(LOG_PM)
         LOG( " Patchmatchs << ", false );
     std::string source_file, target_file, ann_file, annd_file;
-    for (auto i = kfIndexs.begin(); i != kfIndexs.end(); i++) {
-        source_file = sourcesFiles[*i];
-        target_file = targetsFiles[*i];
+    for (size_t i : kfIndexs) {
+        source_file = sourcesFiles[i];
+        target_file = targetsFiles[i];
 
         ann_file = pmResultPath + "/" + getAnnFilename(source_file, "s2t.jpg");
         annd_file = pmResultPath + "/" + getAnndFilename(source_file, "s2t.jpg");
@@ -566,7 +571,7 @@ void getAlignResults::calcPatchmatch()
         patchMatch(target_file, source_file, ann_file, annd_file);
 
         if(LOG_PM)
-            LOG( std::to_string(*i) + " ", false);
+            LOG( std::to_string(i) + " ", false);
     }
     if(LOG_PM)
         LOG( "<< Done" );
@@ -615,6 +620,7 @@ void getAlignResults::readAnnTXT(std::string ann_txt_file, cv::Mat1i &result)
 // calculate camera's world matrix's inv (4*4)
 void getAlignResults::generateTargets()
 {
+    E1 = 0;
     if(LOG_SAVE_T)
         LOG( " Targets << ", false );
     if(OUTPUT_T_M_INSTANT){
@@ -628,7 +634,7 @@ void getAlignResults::generateTargets()
             LOG( std::to_string(i) + " ", false);
     }
     if(LOG_SAVE_T)
-        LOG( "<< Done" );
+        LOG( "<< Done << E1: " + std::to_string(E1) );
 }
 void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> textures)
 {
@@ -643,7 +649,6 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
     ann_txt = pmResultPath + "/" + getAnnFilename(sourceFile, "t2s.txt");
     cv::Mat1i result_ann_t2s( settings.imgH, settings.imgW );
     readAnnTXT(ann_txt, result_ann_t2s);
-
     cv::Mat4i result_su( cv::Size(settings.imgW, settings.imgH) );
     cv::Mat4i result_sv( cv::Size(settings.imgW, settings.imgH) );
 #pragma omp parallel for
@@ -654,6 +659,15 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         result_sv.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
     }
     getSimilarityTerm(sourcesImgs[target_id], result_ann_s2t, result_ann_t2s, result_su, result_sv);
+
+    // for E1 calculation
+    long E1_1 = 0, E1_2 = 0;
+    cv::Mat1i result_annd_s2t( settings.imgH, settings.imgW );
+    std::string annd_txt = pmResultPath + "/" + getAnndFilename(sourceFile, "s2t.txt");
+    readAnnTXT(annd_txt, result_annd_s2t);
+    annd_txt = pmResultPath + "/" + getAnndFilename(sourceFile, "t2s.txt");
+    cv::Mat1i result_annd_t2s( settings.imgH, settings.imgW );
+    readAnnTXT(annd_txt, result_annd_t2s);
 
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
@@ -682,20 +696,26 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         cv::Vec3b bgr(0,0,0);
         double _factor = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
         _factor += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
-        _factor += settings.lambda * weightJ;
+        _factor += lamda * weightJ;
         for ( int p_i = 0; p_i < 3; p_i++ ) {
             double _tmp = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
             _tmp += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
-            _tmp += settings.lambda * weightJ * sum_M(p_i) / count_M;
+            _tmp += lamda * weightJ * sum_M(p_i) / count_M;
             bgr(p_i) = std::round(_tmp / _factor);
         }
         target.at<cv::Vec3b>(j, i) = bgr;
+
+        E1_1 += result_annd_s2t.at<int>(j, i);
+        E1_2 += result_annd_t2s.at<int>(j, i);
     }
     if(OUTPUT_T_M_INSTANT) {
         cv::imwrite( targetsFiles[target_id], target );
     } else {
         targetsImgs[target_id] = target;
     }
+
+    // calculate new E1
+    E1 += (settings.alpha_u * E1_1 + settings.alpha_v * E1_2) / settings.patchSize;
 }
 
 void getAlignResults::getSimilarityTerm(cv::Mat3b S, cv::Mat1i ann_s2t, cv::Mat1i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv)
@@ -744,6 +764,7 @@ void getAlignResults::calcSuv(cv::Mat3b S, int i, int j, cv::Mat4i &s, int x, in
  * ---------------------------------------------*/
 void getAlignResults::generateTextures()
 {
+    E2 = 0;
     if(LOG_SAVE_M)
         LOG( " Textures << ", false );
     if(OUTPUT_T_M_INSTANT) {
@@ -757,20 +778,25 @@ void getAlignResults::generateTextures()
             LOG( std::to_string(i) + " ", false);
     }
     if(LOG_SAVE_M)
-        LOG("<< Done");
+        LOG("<< Done << E2: " + std::to_string(E2));
 }
 void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b> targets)
 {
-    cv::Mat3b texture( cv::Size(settings.imgW, settings.imgH) ); // texturesImgs[texture_id]
     int total = settings.imgH * settings.imgW;
+    cv::Mat3b texture( cv::Size(settings.imgW, settings.imgH) ); // texturesImgs[texture_id]
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
+        cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
 
         cv::Vec3b pixel; bool flag_valid;
         float weight = 0, sum_r = 0, sum_g = 0, sum_b = 0, sum_w = 0;
-        cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
+
+        // for E2 calculation
+        std::vector<cv::Vec3b> E2_pixels;
+        std::vector<float> E2_weights;
+
         for ( size_t t : kfIndexs ) {
             flag_valid = true;
             if ( t == texture_id ) {
@@ -792,11 +818,29 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
                 sum_b = sum_b + weight * pixel(0);
                 sum_g = sum_g + weight * pixel(1);
                 sum_r = sum_r + weight * pixel(2);
+
+                E2_pixels.push_back(pixel);
+                E2_weights.push_back(weight);
             }
         }
         texture.at<cv::Vec3b>(j, i)(0) = std::round( sum_b / sum_w );
         texture.at<cv::Vec3b>(j, i)(1) = std::round( sum_g / sum_w );
         texture.at<cv::Vec3b>(j, i)(2) = std::round( sum_r / sum_w );
+
+        // calculating E2
+        double E2_1 = 0;
+        for( size_t _i = 0; _i < E2_pixels.size(); _i++ ) {
+            double E2_2 = 0;
+            for( int _pi = 0; _pi < 3; _pi++ ) {
+                int p1 = E2_pixels[_i](_pi);
+                int p2 = texture.at<cv::Vec3b>(j,i)(_pi);
+                E2_2 += std::pow(p1-p2, 2);
+            }
+            E2_2 *= E2_weights[_i];
+            E2_1 += E2_2;
+        }
+        E2_1 = E2_1 / E2_pixels.size();
+        E2 += E2_1;
     }
     if(OUTPUT_T_M_INSTANT) {
         cv::imwrite( texturesFiles[texture_id], texture );
