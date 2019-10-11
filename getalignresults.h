@@ -54,7 +54,7 @@ public:
 
     double scaleF;
     double E1, E2;
-    double lamda;
+    double E1_E2_lamda;
 
     getAlignResults(Settings &_settings);
     ~getAlignResults();
@@ -64,6 +64,7 @@ public:
     std::string getImgFilename(size_t img_i, std::string pre, std::string ext);
 
     void readCameraTraj(std::string camTraj_file);
+    void readCameraTraj();
     cv::Mat projectToCamera(cv::Mat X_w, size_t id);
     cv::Mat projectToImg(cv::Mat X_w, size_t id);
     bool pointValid(cv::Point2f p_img);

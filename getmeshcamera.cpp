@@ -7,9 +7,9 @@ getMeshCamera::getMeshCamera(Settings &_settings)
 
     float volume_size = settings.volumeSize;
     Eigen::Vector3f volume(volume_size, volume_size, volume_size);
-    pcl::gpu::kinfuLS::KinfuTracker kft(volume, volume_size * 0.8f, settings.originImgH, settings.originImgW);
+    pcl::gpu::kinfuLS::KinfuTracker kft(volume, volume_size * 0.8f, settings.originDepthH, settings.originDepthW);
     // lab data  //(527.3f, 527.08f, 323.73f, 277.25f);
-    kft.setDepthIntrinsics(settings.cameraFx, settings.cameraFy, settings.cameraCx, settings.cameraCy);
+    kft.setDepthIntrinsics(settings.cameraDFx, settings.cameraDFy, settings.cameraDCx, settings.cameraDCy);
     kft.setDepthTruncationForICP(4.5);
     kft.setIcpCorespFilteringParams( 0.1f/*meter*/, (float)sin(20.0f / 180 * 3.14159) );
 
@@ -46,15 +46,24 @@ getMeshCamera::getMeshCamera(Settings &_settings)
 
     // save the pcd file
     kft.extractAndSaveWorld();
-    system( ("cp world.pcd " + settings.pcdWorldFile).c_str() );
+    system( ("cp world.pcd " + settings.keyFramesPath + "/" + settings.pcdWorldFile).c_str() );
     std::cout << "[ PCD File Success ]" << std::endl;
 
     // show the pcd
 //    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
-//    pcl::io::loadPCDFile<pcl::PointXYZ>(settings.pcdWorldFile, *cloud);
+//    pcl::io::loadPCDFile<pcl::PointXYZ>( keyFramesPath + "/" + settings.pcdWorldFile, *cloud);
 //    pcl::visualization::CloudViewer viewer("DEMO");
 //    viewer.showCloud(cloud);
 //    while(!viewer.wasStopped()){}
+
+    // output the ply(point cloud) from the pcd
+    //  (when doing the PCL mesh output, the out-of-memory error occurs)
+    char buf2[24];
+    sprintf(buf2, "-vs %f", settings.volumeSize);
+    std::string str(buf2);
+    system( ("pcl_kinfu_largeScale_mesh_output " + settings.keyFramesPath + "/" + settings.pcdWorldFile + " " + str).c_str() );
+    system( ("cp mesh_1.ply " + settings.keyFramesPath + "/" + settings.plyFile).c_str() );
+    std::cout << "[ PLY Success ]" << std::endl;
 
     std::cout << "------------------------------------" << std::endl;
     return;

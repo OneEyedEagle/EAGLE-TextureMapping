@@ -33,7 +33,7 @@ generateByCameraPose::generateByCameraPose(Settings settings)
     }
     matifs.close();
 
-    std::ofstream  keyifs( settings.kfPoseTxtFile.c_str() );
+    std::ofstream  keyifs( (settings.keyFramesPath + "/" + settings.kfPoseTxtFile).c_str() );
     for(size_t i = 0; i < kfvec.size(); i++) {
         keyifs<<kfvec[i]<<std::endl;
     }
@@ -72,7 +72,7 @@ generateByFrameNum::generateByFrameNum(Settings settings, int num)
     for(int i = settings.frameStart; i <= settings.frameEnd; i += num) {
         kf.push_back(i);
     }
-    std::ofstream  keyifs(settings.kfNumTxtFile.c_str());
+    std::ofstream  keyifs( (settings.keyFramesPath + "/" + settings.kfNumTxtFile).c_str());
     for(size_t i = 0; i < kf.size(); i++) {
         keyifs<<kf[i]<<std::endl;
     }
@@ -83,7 +83,7 @@ generateByFrameNum::generateByFrameNum(Settings settings, int num)
 searchBestFrameByKF::searchBestFrameByKF(Settings settings, int _begin, int _end)
 {
     begin = _begin; end = _end;
-    std::ifstream  kfindex(settings.kfPoseTxtFile.c_str());
+    std::ifstream  kfindex( (settings.keyFramesPath + "/" + settings.kfPoseTxtFile).c_str());
     std::vector<int>  kf;
     while(!kfindex.eof()) {
         int kidx;
@@ -125,7 +125,7 @@ searchBestFrameByKF::searchBestFrameByKF(Settings settings, int _begin, int _end
         lastkf = best;
     }
 
-    std::ofstream  keyifs(settings.kfBestTxtFile.c_str());
+    std::ofstream  keyifs( (settings.keyFramesPath + "/" + settings.kfBestTxtFile).c_str());
     for(size_t i = 0; i < bestkf.size(); i++)
         keyifs<<bestkf[i]<<std::endl;
     keyifs.close();
@@ -173,7 +173,7 @@ float searchBestFrameByKF::getImageScore(std::string filename)
 
 outputKeyframes::outputKeyframes(Settings &settings)
 {
-    std::string kfstring = settings.kfBestTxtFile;
+    std::string kfstring = settings.keyFramesPath + "/" + settings.kfBestTxtFile;
     std::ifstream  kfindex(kfstring.c_str());
     std::vector<int> kf;
     while(!kfindex.eof()) {
@@ -209,7 +209,7 @@ outputKeyframes::outputKeyframes(Settings &settings)
     std::cout<<"kf size:"<<kf.size()<<" traj size:"<<trajs.size()<<std::endl;
 
 
-    std::ofstream  orajifs(settings.kfCameraTxtFile.c_str());
+    std::ofstream  orajifs( (settings.keyFramesPath + "/" + settings.kfCameraTxtFile).c_str());
     for(size_t i = 0; i < kf.size(); i++)
     {
         int idx = kf[i];

@@ -9,20 +9,20 @@
 class Settings
 {
 public:
-    int originImgW, originImgH, imgW, imgH, patchWidth, patchSize;
+    int originImgW, originImgH, originDepthW, originDepthH, imgW, imgH, patchWidth, patchSize;
     int frameStart, frameEnd, scaleTimes;
-    double scaleFactor, scaleInitW, scaleInitH, alpha_u, alpha_v, lambda;
+    double scaleFactor, scaleInitW, scaleInitH, alpha_u, alpha_v, lamda;
     float volumeSize;
 
-    std::string allFramesPath, cameraTxtFile;
+    std::string allFramesPath, cameraTxtFile, camTrajNamePattern;
     std::string keyFramesPath, patchmatchBinFile, originResolution;
     std::string kfCameraTxtFile, kfBestTxtFile, kfPoseTxtFile, kfNumTxtFile;
     std::string rgbNamePattern, dNamePattern, kfRGBNamePattern, kfDNamePattern, rgbNameExt;
     std::string kfRGBMatch, kfDMatch;
-    std::string pcdWorldFile, plyWorldFile, plySColorFilename, plyTColorFilename, plyMColorFilename;
+    std::string pcdWorldFile, plyFile;
 
-    float cameraDepthFactor, cameraFx, cameraFy, cameraCx, cameraCy;
-    cv::Mat1f cameraK;
+    float cameraDFx, cameraDFy, cameraDCx, cameraDCy, cameraFx, cameraFy, cameraCx, cameraCy;
+    cv::Mat1f cameraK, cameraDK;
     std::vector<size_t> kfIndexs;
 
     Settings()
@@ -31,14 +31,21 @@ public:
         //  init lab
         // -----------------
         // origin source img's resolution
-        originImgW = 640;
-        originImgH = 480;
+        originImgW = 1920;
+        originImgH = 1080;
         // camera's data
-        cameraDepthFactor = 1000.0f;
-        cameraFx = 527.3f;
-        cameraFy = 527.08f;
-        cameraCx = 323.73f;
-        cameraCy = 277.25f;
+        cameraFx = 1081.37f;//527.3f;
+        cameraFy = 1081.37f;//527.08f;
+        cameraCx = 959.5f;//323.73f;
+        cameraCy = 539.5f;//277.25f;
+        // origin depth img's resolution
+        originDepthW = originImgW;
+        originDepthH = originImgH;
+        // depth camera's data
+        cameraDFx = cameraFx;
+        cameraDFy = cameraFy;
+        cameraDCx = cameraCx;
+        cameraDCy = cameraCy;
 
         // all frames' path
         allFramesPath = "/home/wsy/TextureRecover/Datas/bloster2";
@@ -51,32 +58,49 @@ public:
         frameEnd = 394;
 
         // keyframes' path (with camera positions' txt file)
-        keyFramesPath = "/home/wsy/TextureRecover/Results/bloster2_1";
+        keyFramesPath = "/home/wsy/TextureRecover/Results/bloster2_2";
         // keyframes' name pattern
-        kfRGBNamePattern = "%03d_rgb." + rgbNameExt;
-        kfRGBMatch = "*_rgb*" + rgbNameExt;
+        kfRGBNamePattern = "color_%02d." + rgbNameExt;
+        kfRGBMatch = "color_*." + rgbNameExt;
         kfDNamePattern = "%03d_d.png";
         kfDMatch = "*_d*";
         // valid keyframes
-        kfIndexs = { 1,2,3,4,6,7,9,10,12,14,15 };
+        kfIndexs = { 0,1,2,3,4 }; // ,5,6,7,9,10,12,14,15
+
+        // (all files are under the keyFramesPath folder)
+        // all frames' camera positions txt-file's full path
+        cameraTxtFile = "traj.txt";
+        // camera files' name pattern (if cameraTxtFile doesn't exist, then assume every image has its own camera file)
+        camTrajNamePattern = "color_%02d.cam";
+        // the file storing best frames' index
+        kfBestTxtFile = "kfBest.txt";
+        // the file storing best frames' index from Camera Pose
+        kfPoseTxtFile =  "kfPose.txt";
+        // the file storing best frames' index from Number Counting method
+        kfNumTxtFile = "kfNum.txt";
+        // key frames' camera positions txt-file's full path
+        kfCameraTxtFile = "kfTraj.txt";
+        // ply files
+        pcdWorldFile = "world.pcd";
+        plyFile = "bloster.ply";
 
         // volume size in PCD file
         volumeSize = 4.0f;
 
         // the size of patch (patchWidth * patchWidth)
-        patchWidth = 5;//7;
+        patchWidth = 5;
 
         // energy function's parameters
-        alpha_u = 0.5;//1;
+        alpha_u = 1;//1;
         //   weight the similarity from Ti to Si
-        alpha_v = 0.5;//2;
+        alpha_v = 1;//2;
         //   weight how much Mi affects Ti
-        lambda = 0.3;//0.1;
+        lamda = 2;//0.1;
 
         // -----------------
         //  custom
         // -----------------
-        init_zhou();
+//        init_zhou();
 
         // -----------------
         //  init
@@ -89,38 +113,16 @@ public:
         scaleFactor = pow( originImgH / 64.0, 1.0 / 9 );
         scaleInitW = originImgW * 1.0 / originImgH * 64;
         scaleInitH = 64;
-//        scaleTimes = 5;
-//        scaleFactor = 2;
-//        scaleInitW = 80;
-//        scaleInitH = 64;
 
         // make the dir
         EAGLE::checkPath(keyFramesPath);
-        // all frames' camera positions txt-file's full path
-        cameraTxtFile = keyFramesPath + "/traj.txt";
-        // the file storing best frames' index
-        kfBestTxtFile = keyFramesPath + "/kfBest.txt";
-        // the file storing best frames' index from Camera Pose
-        kfPoseTxtFile = keyFramesPath + "/kfPose.txt";
-        // the file storing best frames' index from Number Counting method
-        kfNumTxtFile = keyFramesPath + "/kfNum.txt";
-        // key frames' camera positions txt-file's full path
-        kfCameraTxtFile = keyFramesPath + "/kfTraj.txt";
-
-        // world.pcd file's full path
-        pcdWorldFile = keyFramesPath + "/world.pcd";
-        // world.ply file's full path
-        plyWorldFile = keyFramesPath + "/world.ply";
-        // wolrd_color.ply file's name (in keyFramesPath path)
-        plySColorFilename = "world_source.ply";
-        plyTColorFilename = "world_target.ply";
-        plyMColorFilename = "world_texture.ply";
 
         // camera's intrinsic matrix
         //   fx  0 cx
         // [  0 fy cy ]
         //    0  0  1
         cameraK = (cv::Mat_<float>(3,3) << cameraFx, 0, cameraCx, 0, cameraFy, cameraCy, 0, 0, 1);
+        cameraDK = (cv::Mat_<float>(3,3) << cameraDFx, 0, cameraDCx, 0, cameraDFy, cameraDCy, 0, 0, 1);
         // patch's size
         patchSize = patchWidth * patchWidth;
 
@@ -138,7 +140,7 @@ public:
         cameraCx = 639.5f;
         cameraCy = 511.5f;
 
-        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full2";
+        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full";
         rgbNameExt = "jpg";
         rgbNamePattern = "%05d." + rgbNameExt;
         dNamePattern = "%05d.png";
@@ -148,7 +150,38 @@ public:
         kfDNamePattern = "%05d.png";
         kfDMatch = "*.png";
 
-        kfIndexs = {0,6,13,15,21};//{0,4,6,13,17,19,21};
+        kfIndexs = {0,4,6,13};//{0,4,6,13,17,19,21};
+    }
+
+    void init_hw() {
+        // origin source img's resolution
+        originImgW = 1080;
+        originImgH = 1440;
+        // camera's data
+        cameraFx = 1157.374268f;
+        cameraFy = 1158.230469f;
+        cameraCx = 539.235046f;
+        cameraCy = 720.062866f;
+        // origin depth img's resolution
+        originDepthW = 180;
+        originDepthH = 240;
+        // depth camera's data
+        cameraDFx = 192.895721f;
+        cameraDFy = 193.038422f;
+        cameraDCx = 89.872505f;
+        cameraDCy = 120.010483f;
+
+        // all frames' path
+        allFramesPath = "/home/wsy/TextureRecover/Datas/HuaWei/HighLightDataSet/bear1";
+        // all frames' name pattern
+        rgbNameExt = "bin";
+        rgbNamePattern = "color_%04d." + rgbNameExt;
+        dNamePattern = "depth_%04d.bin";
+        // frames' start and end
+        frameStart = 0;
+        frameEnd = 784;
+
+        keyFramesPath = "/home/wsy/TextureRecover/Results/HuaWei_bear1";
     }
 };
 

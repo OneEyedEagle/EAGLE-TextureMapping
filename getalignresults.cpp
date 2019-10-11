@@ -61,7 +61,7 @@ getAlignResults::getAlignResults(Settings &_settings)
     // read the model with mesh
     LOG("[ Read PLY Model ] ");
     //pcl::PolygonMesh mesh;
-    pcl::io::loadPLYFile(settings.plyWorldFile, mesh);
+    pcl::io::loadPLYFile(settings.keyFramesPath + "/" + settings.plyFile, mesh);
     // init remappings
     calcVertexMapping();
     LOG("[ Init Success. " + std::to_string(kfIndexs.size()) + " / " + std::to_string(kfTotal) + " Images " + "]");
@@ -143,6 +143,24 @@ void getAlignResults::readCameraTraj(std::string camTraj_file)
     /*for ( size_t i = 0; i < cameraPoses.size(); i++)
         std::cout << cameraPoses[i] << std::endl; */
 }
+void getAlignResults::readCameraTraj()
+{
+    char buf[18];
+    std::ifstream matifs;
+    for( size_t i = 0; i < kfTotal; i++ ){
+        sprintf(buf, (settings.camTrajNamePattern).c_str(), i);
+        matifs.open(buf);
+        cv::Mat1f mat( cv::Size(4, 4) ); // from camera to world
+        matifs >> mat.at<float>(0,0) >> mat.at<float>(0,1) >> mat.at<float>(0,2) >> mat.at<float>(0,3);
+        matifs >> mat.at<float>(1,0) >> mat.at<float>(1,1) >> mat.at<float>(1,2) >> mat.at<float>(1,3);
+        matifs >> mat.at<float>(2,0) >> mat.at<float>(2,1) >> mat.at<float>(2,2) >> mat.at<float>(2,3);
+        matifs >> mat.at<float>(3,0) >> mat.at<float>(3,1) >> mat.at<float>(3,2) >> mat.at<float>(3,3);
+        cameraPoses.push_back(mat);
+        matifs.close();
+    }
+    /*for ( size_t i = 0; i < cameraPoses.size(); i++)
+        std::cout << cameraPoses[i] << std::endl; */
+}
 
 // project the point to the (id)th camera's coordinate system
 cv::Mat getAlignResults::projectToCamera(cv::Mat X_w, size_t id)
@@ -202,7 +220,10 @@ void getAlignResults::calcVertexMapping()
 {
     // read the camera's world positions of keyframes
     LOG("[ Read Camera Matrixs ] ");
-    readCameraTraj(settings.kfCameraTxtFile);
+    if ( EAGLE::isFileExist(settings.keyFramesPath + "/" + settings.kfCameraTxtFile) )
+        readCameraTraj(settings.keyFramesPath + "/" + settings.kfCameraTxtFile);
+    else
+        readCameraTraj();
 
     // create a RGB point cloud
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -381,7 +402,6 @@ void getAlignResults::calcImgValidMesh(size_t img_i)
             cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
             if ( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
                 int z_new = std::round( 10000 / (lamda(0)/i_uv1.z + lamda(1)/i_uv2.z + lamda(2)/i_uv3.z) );
-//                int z_new = std::round( 10000 * (lamda(0)*i_uv1.z + lamda(1)*i_uv2.z + lamda(2)*i_uv3.z) );
                 int z_old = img_valid_z.at<int>(p_img_i.y, p_img_i.x);
                 if ( z_old < 0 || z_new <= z_old ) {
                     img_valid_z.at<int>(p_img_i.y, p_img_i.x) = z_new;
@@ -420,9 +440,9 @@ void getAlignResults::calcImgWeight(size_t img_i, std::vector<float> vertex_weig
             cv::Point2i p_img( pos.x + dx, pos.y + dy );
             if( ! pointValid(p_img) )
                 continue;
-            cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
             if( img_valid_mesh[img_i].at<cv::Vec2i>(p_img.y, p_img.x)(0) != i )
                 continue;
+            cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
             if( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
                 w = w1*lamda(0) + w2*lamda(1) + w3*lamda(2);
                 weights[img_i].at<float>(p_img.y, p_img.x) = w;
@@ -436,9 +456,9 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
 {
     int total = settings.imgH * settings.imgW;
 #pragma omp parallel for
-    for ( int img_index = 0; img_index < total; img_index++) {
-        int y = img_index / settings.imgW;
-        int x = img_index % settings.imgW;
+    for ( int pixel_index = 0; pixel_index < total; pixel_index++) {
+        int y = pixel_index / settings.imgW;
+        int x = pixel_index % settings.imgW;
         int i = img_valid_mesh[img_i].at<cv::Vec2i>(y, x)(0);
         if( i < 0 )
             continue;
@@ -457,9 +477,7 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
         cv::Point2i p_img_j;
         p_img_j.x = std::round( j_uv1.x * lamda(0) + j_uv2.x * lamda(1) + j_uv3.x * lamda(2) );
         p_img_j.y = std::round( j_uv1.y * lamda(0) + j_uv2.y * lamda(1) + j_uv3.y * lamda(2) );
-        if ( ! pointValid( p_img_j ) )
-            continue;
-        if ( img_valid_mesh[img_j].at<cv::Vec2i>(p_img_j.y, p_img_j.x)(0) == i ) {
+        if ( pointValid( p_img_j ) && img_valid_mesh[img_j].at<cv::Vec2i>(p_img_j.y, p_img_j.x)(0) == i ) {
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(0) = p_img_j.x;
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(1) = p_img_j.y;
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(2) = 1;
@@ -472,9 +490,9 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
  * ---------------------------------------------*/
 void getAlignResults::doIterations()
 {
-//    int scale = settings.scaleTimes-1;
     int scale = 0;
-    lamda = settings.lamda;
+//    scale = settings.scaleTimes-1;
+    E1_E2_lamda = settings.lamda;
     std::vector<cv::String> originSourcesFiles(sourcesFiles); // origin sources
     for ( ; scale < settings.scaleTimes; scale++) {
         // downsample imgs
@@ -524,13 +542,13 @@ void getAlignResults::doIterations()
             }
         }
         // do iterations
-        int iter_count = 80 - scale * 5;
+        int iter_count = 50 - scale * 5;
         for ( int _count = 0; _count < iter_count; _count++) {
-            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]" + " lamda: " + std::to_string(lamda));
+            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]" + " lamda: " + std::to_string(E1_E2_lamda));
             calcPatchmatch();
             generateTargets();
             generateTextures();
-//            lamda = E1 / E2;
+//            E1_E2_lamda = E1 / E2;
         }
         if( ! OUTPUT_T_M_INSTANT) {
             for( size_t i : kfIndexs ){
@@ -660,20 +678,32 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
     }
     getSimilarityTerm(sourcesImgs[target_id], result_ann_s2t, result_ann_t2s, result_su, result_sv);
 
-    // for E1 calculation
-    long E1_1 = 0, E1_2 = 0;
+    // calculate E1
+    unsigned long long E1_1 = 0, E1_2 = 0;
     cv::Mat1i result_annd_s2t( settings.imgH, settings.imgW );
     std::string annd_txt = pmResultPath + "/" + getAnndFilename(sourceFile, "s2t.txt");
     readAnnTXT(annd_txt, result_annd_s2t);
     annd_txt = pmResultPath + "/" + getAnndFilename(sourceFile, "t2s.txt");
     cv::Mat1i result_annd_t2s( settings.imgH, settings.imgW );
     readAnnTXT(annd_txt, result_annd_t2s);
+#pragma omp parallel for
+    for ( int index = 0; index < total; index++) {
+        int j = index / settings.imgW;
+        int i = index % settings.imgW;
+        if (result_annd_s2t.at<int>(j, i) > 0)
+            E1_1 += result_annd_s2t.at<int>(j, i);
+        if (result_annd_t2s.at<int>(j, i) > 0)
+            E1_2 += result_annd_t2s.at<int>(j, i);
+    }
+    E1 += (settings.alpha_u * E1_1 + settings.alpha_v * E1_2) / settings.patchSize;
 
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
         cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
+        if( ! pointValid(p_img) )
+            continue;
         double weightJ = weights[target_id].at<float>(p_img.y, p_img.x);
 
         // consistency term
@@ -696,26 +726,20 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         cv::Vec3b bgr(0,0,0);
         double _factor = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
         _factor += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
-        _factor += lamda * weightJ;
+        _factor += E1_E2_lamda * weightJ;
         for ( int p_i = 0; p_i < 3; p_i++ ) {
             double _tmp = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
             _tmp += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
-            _tmp += lamda * weightJ * sum_M(p_i) / count_M;
+            _tmp += E1_E2_lamda * weightJ * sum_M(p_i) / count_M;
             bgr(p_i) = std::round(_tmp / _factor);
         }
         target.at<cv::Vec3b>(j, i) = bgr;
-
-        E1_1 += result_annd_s2t.at<int>(j, i);
-        E1_2 += result_annd_t2s.at<int>(j, i);
     }
     if(OUTPUT_T_M_INSTANT) {
         cv::imwrite( targetsFiles[target_id], target );
     } else {
         targetsImgs[target_id] = target;
     }
-
-    // calculate new E1
-    E1 += (settings.alpha_u * E1_1 + settings.alpha_v * E1_2) / settings.patchSize;
 }
 
 void getAlignResults::getSimilarityTerm(cv::Mat3b S, cv::Mat1i ann_s2t, cv::Mat1i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv)
@@ -836,11 +860,9 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
                 int p2 = texture.at<cv::Vec3b>(j,i)(_pi);
                 E2_2 += std::pow(p1-p2, 2);
             }
-            E2_2 *= E2_weights[_i];
-            E2_1 += E2_2;
+            E2_1 += (E2_2 * E2_weights[_i]);
         }
-        E2_1 = E2_1 / E2_pixels.size();
-        E2 += E2_1;
+        E2 += (E2_1 / E2_pixels.size());
     }
     if(OUTPUT_T_M_INSTANT) {
         cv::imwrite( texturesFiles[texture_id], texture );
@@ -885,7 +907,7 @@ void getAlignResults::generateColoredPLY(std::string path)
 
     // convert to mesh
     pcl::toPCLPointCloud2(*cloud_rgb, mesh.cloud);
-    pcl::io::savePLYFile( path + "/" + settings.plyTColorFilename, mesh );
+    pcl::io::savePLYFile( path + "/" + "result_T.ply", mesh );
 }
 
 /*----------------------------------------------
