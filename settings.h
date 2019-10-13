@@ -65,7 +65,7 @@ public:
         kfDNamePattern = "%03d_d.png";
         kfDMatch = "*_d*";
         // valid keyframes
-        kfIndexs = { 0,1,2,3,4 }; // ,5,6,7,9,10,12,14,15
+        kfIndexs = { 1,3,4,5,7,9,12 }; // ,5,6,7,9,10,12,14,15
 
         // (all files are under the keyFramesPath folder)
         // all frames' camera positions txt-file's full path
@@ -93,9 +93,9 @@ public:
         // energy function's parameters
         alpha_u = 1;//1;
         //   weight the similarity from Ti to Si
-        alpha_v = 1;//2;
+        alpha_v = 2;//2;
         //   weight how much Mi affects Ti
-        lamda = 2;//0.1;
+        lamda = 0.4;//0.1;
 
         // -----------------
         //  custom
@@ -110,9 +110,9 @@ public:
 
         // scale
         scaleTimes = 10;
-        scaleFactor = pow( originImgH / 64.0, 1.0 / 9 );
-        scaleInitW = originImgW * 1.0 / originImgH * 64;
-        scaleInitH = 64;
+        scaleInitH = 80;
+        scaleInitW = originImgW * 1.0 / originImgH * scaleInitH;
+        scaleFactor = pow( originImgH * 1.0 / scaleInitH, 1.0 / (scaleTimes-1) );
 
         // make the dir
         EAGLE::checkPath(keyFramesPath);

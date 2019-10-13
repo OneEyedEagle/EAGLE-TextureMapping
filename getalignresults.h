@@ -60,7 +60,7 @@ public:
     ~getAlignResults();
     void LOG(std::string t, bool nl = true);
 
-    std::string getImgFile(size_t img_i);
+    std::string getImgFilename(size_t img_i);
     std::string getImgFilename(size_t img_i, std::string pre, std::string ext);
 
     void readCameraTraj(std::string camTraj_file);
@@ -82,9 +82,10 @@ public:
 
     void calcPatchmatch();
     void patchMatch(std::string imgA_file, std::string imgB_file, std::string ann_raw_file, std::string annd_file);
-    std::string getAnnFilename(std::string img_file, std::string sym);
-    std::string getAnndFilename(std::string img_file, std::string sym);
+    std::string getAnnFilename(size_t img_id, std::string sym);
+    std::string getAnndFilename(size_t img_id, std::string sym);
     void readAnnTXT(std::string ann_txt_file, cv::Mat1i &result);
+    double calcAnndSum(std::string annd_txt_file);
 
     void generateTargets();
     void generateTargetI(size_t target_id, std::vector<cv::Mat3b> textures);
