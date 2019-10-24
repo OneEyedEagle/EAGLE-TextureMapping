@@ -152,37 +152,6 @@ public:
 
         kfIndexs = {0,4,6,13};//{0,4,6,13,17,19,21};
     }
-
-    void init_hw() {
-        // origin source img's resolution
-        originImgW = 1080;
-        originImgH = 1440;
-        // camera's data
-        cameraFx = 1157.374268f;
-        cameraFy = 1158.230469f;
-        cameraCx = 539.235046f;
-        cameraCy = 720.062866f;
-        // origin depth img's resolution
-        originDepthW = 180;
-        originDepthH = 240;
-        // depth camera's data
-        cameraDFx = 192.895721f;
-        cameraDFy = 193.038422f;
-        cameraDCx = 89.872505f;
-        cameraDCy = 120.010483f;
-
-        // all frames' path
-        allFramesPath = "/home/wsy/TextureRecover/Datas/HuaWei/HighLightDataSet/bear1";
-        // all frames' name pattern
-        rgbNameExt = "bin";
-        rgbNamePattern = "color_%04d." + rgbNameExt;
-        dNamePattern = "depth_%04d.bin";
-        // frames' start and end
-        frameStart = 0;
-        frameEnd = 784;
-
-        keyFramesPath = "/home/wsy/TextureRecover/Results/HuaWei_bear1";
-    }
 };
 
 #endif // SETTINGS_H
