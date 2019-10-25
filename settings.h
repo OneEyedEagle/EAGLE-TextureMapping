@@ -82,7 +82,7 @@ public:
         kfCameraTxtFile = "kfTraj.txt";
         // ply files
         pcdWorldFile = "world.pcd";
-        plyFile = "bloster.ply";
+        plyFile = "world.ply";
 
         // volume size in PCD file
         volumeSize = 4.0f;
@@ -95,12 +95,12 @@ public:
         //   weight the similarity from Ti to Si
         alpha_v = 2;//2;
         //   weight how much Mi affects Ti
-        lamda = 0.4;//0.1;
+        lamda = 0.1;//0.1;
 
         // -----------------
         //  custom
         // -----------------
-//        init_zhou();
+        init_zhou();
 
         // -----------------
         //  init
@@ -140,7 +140,7 @@ public:
         cameraCx = 639.5f;
         cameraCy = 511.5f;
 
-        keyFramesPath = "/home/wsy/TextureRecover/Results/zhou_full";
+        keyFramesPath = "/home/wsy/EAGLE/EAGLE-TextureMapping/datas";
         rgbNameExt = "jpg";
         rgbNamePattern = "%05d." + rgbNameExt;
         dNamePattern = "%05d.png";

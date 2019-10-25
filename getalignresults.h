@@ -49,6 +49,7 @@ public:
     pcl::PolygonMesh mesh;
     std::map<size_t, std::vector<cv::Point3f>> uvs;
     std::map<size_t, cv::Mat> img_valid_mesh;
+    std::map<size_t, cv::Mat> img_valid_mesh_lamda;
     std::map<size_t, cv::Mat> weights;
     std::map<size_t, std::map<size_t, cv::Mat>> mappings;
 

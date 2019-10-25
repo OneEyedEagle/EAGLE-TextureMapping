@@ -8,7 +8,7 @@
 #define LOG_SAVE_T true
 #define LOG_SAVE_M true
 
-#define OUTPUT_T_M_INSTANT false
+#define OUTPUT_T_M_INSTANT true
 
 /*----------------------------------------------
  *  To get the position of the patchmatch result
@@ -84,6 +84,7 @@ getAlignResults::~getAlignResults()
     uvs.clear();
     mappings.clear();
     img_valid_mesh.clear();
+    img_valid_mesh_lamda.clear();
 }
 
 /*----------------------------------------------
@@ -186,7 +187,7 @@ cv::Mat getAlignResults::projectToImg(cv::Mat X_w, size_t id)
     cv::Mat X_c = projectToCamera(X_w, id);
     cv::Mat1f X_img = (cv::Mat_<float>(3, 1) << X_c.at<float>(0), X_c.at<float>(1), X_c.at<float>(2));
     X_img = settings.cameraK * X_img / X_c.at<float>(2);
-    X_img.at<float>(2) = X_c.at<float>(2);
+    X_img.at<float>(2) = X_c.at<float>(2); // store the depth to do the visibility-check
     return X_img;
 }
 
@@ -278,12 +279,16 @@ void getAlignResults::calcVertexMapping()
     LOG("[ Calculating valid mesh of every pixel on each Si ]");
     //std::map<size_t, cv::Mat> img_valid_mesh;
     img_valid_mesh.clear();
+    img_valid_mesh_lamda.clear();
     LOG( " Valid Mesh << ", false );
     for( size_t t : kfIndexs ) {
-        img_valid_mesh[t] = cv::Mat2i( cv::Size(settings.originImgW, settings.originImgH) );
+        img_valid_mesh[t] = cv::Mat1i( cv::Size(settings.originImgW, settings.originImgH) );
+        img_valid_mesh_lamda[t] = cv::Mat3f( cv::Size(settings.originImgW, settings.originImgH) );
         for( int i = 0; i < settings.originImgW; i++ )
-            for( int j = 0; j < settings.originImgH; j++ )
-                img_valid_mesh[t].at<cv::Vec2i>(j, i) = cv::Vec2i(-1, 0);
+            for( int j = 0; j < settings.originImgH; j++ ) {
+                img_valid_mesh[t].at<int>(j, i) = -1;
+                img_valid_mesh_lamda[t].at<cv::Vec3f>(j, i) = cv::Vec3f(-1, -1, -1);
+            }
         calcImgValidMesh(t);
         LOG( std::to_string(t) + " ", false );
     }
@@ -413,13 +418,13 @@ void getAlignResults::calcImgValidMesh(size_t img_i)
                 int z_old = img_valid_z.at<int>(p_img_i.y, p_img_i.x);
                 if ( z_old < 0 || z_new < z_old ) {
                     img_valid_z.at<int>(p_img_i.y, p_img_i.x) = z_new;
-                    img_valid_mesh[img_i].at<cv::Vec2i>(p_img_i.y, p_img_i.x)(0) = i;
-                    img_valid_mesh[img_i].at<cv::Vec2i>(p_img_i.y, p_img_i.x)(1) = index;
+                    img_valid_mesh[img_i].at<int>(p_img_i.y, p_img_i.x) = i;
+                    img_valid_mesh_lamda[img_i].at<cv::Vec3f>(p_img_i.y, p_img_i.x) = lamda;
                 }
             }
         }
     }
-    //std::cout << img_valid_z << std::endl;
+//    std::cout << img_valid_z << std::endl;
 }
 
 void getAlignResults::calcImgWeight(size_t img_i, std::vector<float> vertex_weight)
@@ -448,7 +453,7 @@ void getAlignResults::calcImgWeight(size_t img_i, std::vector<float> vertex_weig
             cv::Point2i p_img( pos.x + dx, pos.y + dy );
             if( ! pointValid(p_img) )
                 continue;
-            if( img_valid_mesh[img_i].at<cv::Vec2i>(p_img.y, p_img.x)(0) != i )
+            if( img_valid_mesh[img_i].at<int>(p_img.y, p_img.x) != i )
                 continue;
             cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
             if( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
@@ -467,25 +472,22 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
     for ( int pixel_index = 0; pixel_index < total; pixel_index++) {
         int y = pixel_index / settings.imgW;
         int x = pixel_index % settings.imgW;
-        int i = img_valid_mesh[img_i].at<cv::Vec2i>(y, x)(0);
+        int i = img_valid_mesh[img_i].at<int>(y, x);
         if( i < 0 )
             continue;
+        cv::Vec3f lamda = img_valid_mesh_lamda[img_i].at<cv::Vec3f>(y, x);
 
         size_t p1 = mesh.polygons[i].vertices[0];
         size_t p2 = mesh.polygons[i].vertices[1];
         size_t p3 = mesh.polygons[i].vertices[2];
-        cv::Rect pos(0,0,0,0);
-        cv::Mat3f lamdas = calcPosCoord( uvs[img_i][p1], uvs[img_i][p2], uvs[img_i][p3], pos);
-        int index = img_valid_mesh[img_i].at<cv::Vec2i>(y, x)(1);
-        cv::Vec3f lamda = lamdas.at<cv::Vec3f>( index / pos.width, index % pos.width );
-
         cv::Point3f j_uv1 = uvs[img_j][p1];
         cv::Point3f j_uv2 = uvs[img_j][p2];
         cv::Point3f j_uv3 = uvs[img_j][p3];
+
         cv::Point2i p_img_j;
         p_img_j.x = std::round( j_uv1.x * lamda(0) + j_uv2.x * lamda(1) + j_uv3.x * lamda(2) );
         p_img_j.y = std::round( j_uv1.y * lamda(0) + j_uv2.y * lamda(1) + j_uv3.y * lamda(2) );
-        if ( pointValid( p_img_j ) && img_valid_mesh[img_j].at<cv::Vec2i>(p_img_j.y, p_img_j.x)(0) == i ) {
+        if ( pointValid( p_img_j ) && img_valid_mesh[img_j].at<int>(p_img_j.y, p_img_j.x) == i ) {
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(0) = p_img_j.x;
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(1) = p_img_j.y;
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(2) = 1;
@@ -499,7 +501,8 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
 void getAlignResults::doIterations()
 {
     int scale = 0;
-//    scale = settings.scaleTimes-1;
+    scale = settings.scaleTimes-1;
+    int iter_count = 50;
     E1_E2_lamda = settings.lamda;
     std::vector<cv::String> originSourcesFiles(sourcesFiles); // origin sources
     for ( ; scale < settings.scaleTimes; scale++) {
@@ -550,14 +553,13 @@ void getAlignResults::doIterations()
             }
         }
         // do iterations
-        int iter_count = 50 - scale * 5;
         for ( int _count = 0; _count < iter_count; _count++) {
             LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]" + " lamda: " + std::to_string(E1_E2_lamda));
             calcPatchmatch();
             generateTargets();
             generateTextures();
-//            E1_E2_lamda = E1 / E2;
         }
+        iter_count -= 5;
         if( ! OUTPUT_T_M_INSTANT) {
             for( size_t i : kfIndexs ){
                 cv::imwrite( targetsFiles[i], targetsImgs[i] );
@@ -709,7 +711,7 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         int j = index / settings.imgW;
         int i = index % settings.imgW;
         cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
-        double weightJ = weights[target_id].at<float>(p_img.y, p_img.x);
+        double weight = weights[target_id].at<float>(p_img.y, p_img.x);
 
         // consistency term
         cv::Vec3i sum_M(0,0,0); int count_M = 0;
@@ -731,11 +733,11 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         cv::Vec3b bgr(0,0,0);
         double _factor = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
         _factor += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
-        _factor += E1_E2_lamda * weightJ;
+        _factor += E1_E2_lamda * weight;
         for ( int p_i = 0; p_i < 3; p_i++ ) {
             double _tmp = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
             _tmp += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
-            _tmp += E1_E2_lamda * weightJ * sum_M(p_i) / count_M;
+            _tmp += E1_E2_lamda * weight * sum_M(p_i) / count_M;
             int p_v = std::round(_tmp / _factor);
             bgr(p_i) = EAGLE_MAX( EAGLE_MIN(p_v, 255), 0 );
         }
@@ -832,7 +834,6 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
         for ( size_t t : kfIndexs ) {
             flag_valid = true;
             if ( t == texture_id ) {
-//                flag_valid = false;
                 weight = weights[t].at<float>(p_img.y, p_img.x);
                 pixel = targets[t].at<cv::Vec3b>(j, i);
             } else {
@@ -899,7 +900,7 @@ void getAlignResults::generateColoredPLY(std::string path)
             for ( size_t t : kfIndexs ) {
                 cv::Point3f pi_uv = uvs[t][p];
                 cv::Point2i p_img(std::round(pi_uv.x), std::round(pi_uv.y));
-                if ( pointValid(p_img) && img_valid_mesh[t].at<cv::Vec2i>(p_img.y, p_img.x)(0) == i ) {
+                if ( pointValid(p_img) && img_valid_mesh[t].at<int>(p_img.y, p_img.x) == i ) {
                     cv::Vec3b pixel = targetsImgs[t].at<cv::Vec3b>(p_img.y, p_img.x);
                     pixel_sum += pixel;
                     count += 1;
@@ -918,8 +919,3 @@ void getAlignResults::generateColoredPLY(std::string path)
     pcl::io::savePLYFile( path + "/" + "result_T.ply", mesh );
 }
 
-/*----------------------------------------------
- *  Generate UV Map for the Mesh
- * ---------------------------------------------*/
-//void getAlignResults::genereteUVMaps()
-//{}
