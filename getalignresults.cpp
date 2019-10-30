@@ -728,17 +728,21 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         int i = index % settings.imgW;
         cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
         double weight = weights[target_id].at<float>(p_img.y, p_img.x);
+        double _factor1, _factor2; cv::Vec3d sum_bgr(0,0,0);
 
         // similarity term
         cv::Vec3d sum_S(0,0,0);
-
+        _factor1  = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
+        _factor1 += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
         for( int p_i = 0; p_i < 3; p_i++ ) {
             sum_S(p_i) += settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
             sum_S(p_i) += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
+            sum_bgr(p_i) = sum_S(p_i);
         }
 
         // consistency term
         cv::Vec3i sum_M(0,0,0); int count_M = 0;
+        _factor2 = settings.lamda * weight;
         // if the pixel is in bg, then no optimization with consistency term
         cv::Vec3i Xij = mappings[target_id][target_id].at<cv::Vec3i>(p_img.y, p_img.x);
         if ( Xij(2) > 0 ) {
@@ -756,23 +760,19 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
                     }
                 }
             }
+            for ( int p_i = 0; p_i < 3; p_i++ )
+              sum_bgr(p_i) += _factor2 * sum_M(p_i) / count_M;
         }
 
         // generate the pixel of Ti
         cv::Vec3b bgr(0,0,0);
-        double _factor1, _factor2;
-        _factor1  = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
-        _factor1 += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
-        _factor2  = settings.lamda * weight;
         for ( int p_i = 0; p_i < 3; p_i++ ) {
-            double _sum = _factor1 * sum_S(p_i);
             if ( count_M > 0 ) {
-                _sum += _factor2 * sum_M(p_i) / count_M;
-                _sum = _sum / (_factor1 + _factor2);
+                sum_bgr(p_i) = sum_bgr(p_i) / (_factor1 + _factor2);
             } else {
-                _sum = _sum / (_factor1);
+                sum_bgr(p_i) = sum_bgr(p_i) / (_factor1);
             }
-            bgr(p_i) = EAGLE_MAX( EAGLE_MIN(std::round(_sum), 255), 0 );
+            bgr(p_i) = EAGLE_MAX( EAGLE_MIN(std::round(sum_bgr(p_i)), 255), 0 );
         }
         target.at<cv::Vec3b>(j, i) = bgr;
     }
