@@ -55,7 +55,6 @@ public:
 
     double scaleF;
     double E1, E2;
-    double E1_E2_lamda;
 
     getAlignResults(Settings &_settings);
     ~getAlignResults();
@@ -96,7 +95,7 @@ public:
     void generateTextures();
     void generateTextureI(size_t texture_id, std::vector<cv::Mat3b> targets);
 
-    void generateColoredPLY(std::string path);
+    void generateColoredPLY(std::string path, std::string filename, std::vector<cv::Mat3b> imgs);
 };
 
 #endif // GETALIGNRESULTS_H

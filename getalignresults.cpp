@@ -60,13 +60,24 @@ getAlignResults::getAlignResults(Settings &_settings)
     LOG("[ Alpha U: " + std::to_string(settings.alpha_u) + " Alpha V: " + std::to_string(settings.alpha_v) + " Lambda: " + std::to_string(settings.lamda) + " ] ");
     //pcl::PolygonMesh mesh;
     pcl::io::loadPLYFile(settings.keyFramesPath + "/" + settings.plyFile, mesh);
-    LOG( "[ PLY Model: " + std::to_string(mesh.cloud.width) + " vertexs | " + std::to_string(mesh.polygons.size()) + " faces ]");
+    LOG("[ PLY Model: " + std::to_string(mesh.cloud.width) + " vertexs | " + std::to_string(mesh.polygons.size()) + " faces ]");
     // init remappings
     calcVertexMapping();
     LOG("[ Init Success. " + std::to_string(kfIndexs.size()) + " / " + std::to_string(kfTotal) + " Images " + "]");
+
     doIterations();
-    generateColoredPLY(resultsPath);
-    LOG( "[ End ]" );
+
+    sourcesImgs.clear();
+    for ( size_t i = 0; i < kfTotal; i++ )
+        sourcesImgs.push_back( cv::imread(sourcesFiles[i]) ); // img.at<cv::Vec3b>(y, x)(0)
+    generateColoredPLY(resultsPath, "result_S.ply", sourcesImgs);
+    cv::glob(targetsPath + "/" + settings.kfRGBMatch, targetsFiles, false);
+    targetsImgs.clear();
+    for( size_t i = 0; i < kfTotal; i++ )
+       targetsImgs.push_back( cv::imread(targetsFiles[i]) );
+    generateColoredPLY(resultsPath, "result_T.ply", targetsImgs);
+    LOG("[ Output PLY Success ]");
+    LOG("[ End ]");
 }
 getAlignResults::~getAlignResults()
 {
@@ -124,14 +135,14 @@ std::string getAlignResults::getImgFilename(size_t img_i, std::string pre, std::
 /*----------------------------------------------
  *  Camera
  * ---------------------------------------------*/
-// from camera to world
+// the cameraPoses are matrixs that project a point from world coord to camera coord
 void getAlignResults::readCameraTraj(std::string camTraj_file)
 {
     std::ifstream  matifs(camTraj_file.c_str());
     int id;
     while( !matifs.eof() )
     {
-        cv::Mat1f mat( cv::Size(4, 4) ); // from camera to world
+        cv::Mat1f mat( cv::Size(4, 4) );
         matifs >> id >> id >> id;
         matifs >> mat.at<float>(0,0) >> mat.at<float>(0,1) >> mat.at<float>(0,2) >> mat.at<float>(0,3);
         matifs >> mat.at<float>(1,0) >> mat.at<float>(1,1) >> mat.at<float>(1,2) >> mat.at<float>(1,3);
@@ -139,14 +150,14 @@ void getAlignResults::readCameraTraj(std::string camTraj_file)
         matifs >> mat.at<float>(3,0) >> mat.at<float>(3,1) >> mat.at<float>(3,2) >> mat.at<float>(3,3);
         if(matifs.fail())
             break;
-        cameraPoses.push_back( mat.inv() );
+        if ( ! settings.camTrajFromWorldToCam )
+            mat = mat.inv();
+        cameraPoses.push_back( mat );
     }
     matifs.close();
     /*for ( size_t i = 0; i < cameraPoses.size(); i++)
         std::cout << cameraPoses[i] << std::endl; */
 }
-
-//  from world to camera
 void getAlignResults::readCameraTraj()
 {
     char buf[18];
@@ -165,11 +176,13 @@ void getAlignResults::readCameraTraj()
         mat.at<float>(3,1) = 0;
         mat.at<float>(3,2) = 0;
         mat.at<float>(3,3) = 1;
+        if ( ! settings.camTrajFromWorldToCam )
+            mat = mat.inv();
         cameraPoses.push_back(mat);
         matifs.close();
     }
-//    for ( size_t i = 0; i < cameraPoses.size(); i++)
-//        std::cout << cameraPoses[i] << std::endl;
+    /*for ( size_t i = 0; i < cameraPoses.size(); i++)
+        std::cout << cameraPoses[i] << std::endl; */
 }
 
 // project the point to the (id)th camera's coordinate system
@@ -343,13 +356,11 @@ void getAlignResults::calcVertexMapping()
         mappings[img_i] = std::map<size_t, cv::Mat>();
         LOG( " " + std::to_string(img_i) + " to ", false );
         for( size_t img_j : kfIndexs ) {
-            if( img_i != img_j ) {
-                mappings[img_i][img_j] = cv::Mat3i( cv::Size(settings.originImgW, settings.originImgH) );
-                for( int i = 0; i < settings.originImgW; i++ )
-                    for( int j = 0; j < settings.originImgH; j++ )
-                        mappings[img_i][img_j].at<cv::Vec3i>(j, i) = cv::Vec3i(0,0,0);
-                calcRemapping(img_i, img_j);
-            }
+            mappings[img_i][img_j] = cv::Mat3i( cv::Size(settings.originImgW, settings.originImgH) );
+            for( int i = 0; i < settings.originImgW; i++ )
+                for( int j = 0; j < settings.originImgH; j++ )
+                    mappings[img_i][img_j].at<cv::Vec3i>(j, i) = cv::Vec3i(0,0,0);
+            calcRemapping(img_i, img_j);
             LOG( std::to_string(img_j) + " ", false );
         }
         LOG( "<< Done" );
@@ -414,7 +425,7 @@ void getAlignResults::calcImgValidMesh(size_t img_i)
                 continue;
             cv::Vec3f lamda = lamdas.at<cv::Vec3f>(dy, dx);
             if ( lamda(0) >= 0 && lamda(1) >= 0 && lamda(2) >= 0 ) {
-                int z_new = std::round( 10000 / (lamda(0)/i_uv1.z + lamda(1)/i_uv2.z + lamda(2)/i_uv3.z) );
+                int z_new = std::round( 10000.0 / (lamda(0)/i_uv1.z + lamda(1)/i_uv2.z + lamda(2)/i_uv3.z) );
                 int z_old = img_valid_z.at<int>(p_img_i.y, p_img_i.x);
                 if ( z_old < 0 || z_new < z_old ) {
                     img_valid_z.at<int>(p_img_i.y, p_img_i.x) = z_new;
@@ -475,8 +486,15 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
         int i = img_valid_mesh[img_i].at<int>(y, x);
         if( i < 0 )
             continue;
-        cv::Vec3f lamda = img_valid_mesh_lamda[img_i].at<cv::Vec3f>(y, x);
 
+        if( img_i == img_j ){
+            mappings[img_i][img_j].at<cv::Vec3i>(y, x)(0) = x;
+            mappings[img_i][img_j].at<cv::Vec3i>(y, x)(1) = y;
+            mappings[img_i][img_j].at<cv::Vec3i>(y, x)(2) = 1;
+            continue;
+        }
+
+        cv::Vec3f lamda = img_valid_mesh_lamda[img_i].at<cv::Vec3f>(y, x);
         size_t p1 = mesh.polygons[i].vertices[0];
         size_t p2 = mesh.polygons[i].vertices[1];
         size_t p3 = mesh.polygons[i].vertices[2];
@@ -501,9 +519,8 @@ void getAlignResults::calcRemapping(size_t img_i, size_t img_j)
 void getAlignResults::doIterations()
 {
     int scale = 0;
-    scale = settings.scaleTimes-1;
+//    scale = settings.scaleTimes-1;
     int iter_count = 50;
-    E1_E2_lamda = settings.lamda;
     std::vector<cv::String> originSourcesFiles(sourcesFiles); // origin sources
     for ( ; scale < settings.scaleTimes; scale++) {
         // downsample imgs
@@ -554,7 +571,7 @@ void getAlignResults::doIterations()
         }
         // do iterations
         for ( int _count = 0; _count < iter_count; _count++) {
-            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]" + " lamda: " + std::to_string(E1_E2_lamda));
+            LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]");
             calcPatchmatch();
             generateTargets();
             generateTextures();
@@ -604,7 +621,6 @@ void getAlignResults::calcPatchmatch()
     if(LOG_PM)
         LOG( "<< Done" );
 }
-// 利用PatchMatch方法查找出其中的相似块
 void getAlignResults::patchMatch(std::string imgA_file, std::string imgB_file, std::string ann_file, std::string annd_file)
 {
     // bin imageA_filename imageB_filename ann_img_filename annd_img_filename
@@ -661,7 +677,6 @@ double getAlignResults::calcAnndSum(std::string annd_txt_file)
 /*----------------------------------------------
  *  Generate Tis
  * ---------------------------------------------*/
-// calculate camera's world matrix's inv (4*4)
 void getAlignResults::generateTargets()
 {
     E1 = 0;
@@ -683,6 +698,7 @@ void getAlignResults::generateTargets()
 void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> textures)
 {
     int total = settings.imgH * settings.imgW;
+    int totalPatch = (settings.imgW - settings.patchWidth + 1) * (settings.imgH - settings.patchWidth + 1);
     cv::Mat3b target( cv::Size(settings.imgW, settings.imgH) );
 
     // similarity term
@@ -713,33 +729,50 @@ void getAlignResults::generateTargetI(size_t target_id, std::vector<cv::Mat3b> t
         cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
         double weight = weights[target_id].at<float>(p_img.y, p_img.x);
 
+        // similarity term
+        cv::Vec3d sum_S(0,0,0);
+
+        for( int p_i = 0; p_i < 3; p_i++ ) {
+            sum_S(p_i) += settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
+            sum_S(p_i) += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
+        }
+
         // consistency term
         cv::Vec3i sum_M(0,0,0); int count_M = 0;
-        for( size_t t : kfIndexs ) {
-            if ( t == target_id ) {
-                sum_M += textures[t].at<cv::Vec3b>(j, i);
-                count_M += 1;
-            } else {
-                cv::Vec3i Xij = mappings[target_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
-                if ( Xij(2) > 0 ){
-                    cv::Point2i p_img_t(cv::Point2i(Xij(0), Xij(1)));
-                    cv::Point2i p_img_ts = imgToScale(p_img_t);
-                    sum_M += textures[t].at<cv::Vec3b>(p_img_ts.y, p_img_ts.x);
+        // if the pixel is in bg, then no optimization with consistency term
+        cv::Vec3i Xij = mappings[target_id][target_id].at<cv::Vec3i>(p_img.y, p_img.x);
+        if ( Xij(2) > 0 ) {
+            for( size_t t : kfIndexs ) {
+                if ( t == target_id ) {
+                    sum_M += textures[t].at<cv::Vec3b>(j, i);
                     count_M += 1;
+                } else {
+                    cv::Vec3i Xij = mappings[target_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
+                    if ( Xij(2) > 0 ){
+                        cv::Point2i p_img_t(cv::Point2i(Xij(0), Xij(1)));
+                        cv::Point2i p_img_ts = imgToScale(p_img_t);
+                        sum_M += textures[t].at<cv::Vec3b>(p_img_ts.y, p_img_ts.x);
+                        count_M += 1;
+                    }
                 }
             }
         }
+
         // generate the pixel of Ti
         cv::Vec3b bgr(0,0,0);
-        double _factor = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
-        _factor += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
-        _factor += E1_E2_lamda * weight;
+        double _factor1, _factor2;
+        _factor1  = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
+        _factor1 += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
+        _factor2  = settings.lamda * weight;
         for ( int p_i = 0; p_i < 3; p_i++ ) {
-            double _tmp = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
-            _tmp += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
-            _tmp += E1_E2_lamda * weight * sum_M(p_i) / count_M;
-            int p_v = std::round(_tmp / _factor);
-            bgr(p_i) = EAGLE_MAX( EAGLE_MIN(p_v, 255), 0 );
+            double _sum = _factor1 * sum_S(p_i);
+            if ( count_M > 0 ) {
+                _sum += _factor2 * sum_M(p_i) / count_M;
+                _sum = _sum / (_factor1 + _factor2);
+            } else {
+                _sum = _sum / (_factor1);
+            }
+            bgr(p_i) = EAGLE_MAX( EAGLE_MIN(std::round(_sum), 255), 0 );
         }
         target.at<cv::Vec3b>(j, i) = bgr;
     }
@@ -861,17 +894,19 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
         texture.at<cv::Vec3b>(j, i)(2) = std::round( sum_r / sum_w );
 
         // calculating E2
-        double E2_1 = 0;
-        for( size_t _i = 0; _i < E2_pixels.size(); _i++ ) {
-            double E2_2 = 0;
-            for( int _pi = 0; _pi < 3; _pi++ ) {
-                int p1 = E2_pixels[_i](_pi);
-                int p2 = texture.at<cv::Vec3b>(j,i)(_pi);
-                E2_2 += std::pow(p1-p2, 2);
+        if(E2_pixels.size() > 0) {
+            double E2_1 = 0;
+            for( size_t _i = 0; _i < E2_pixels.size(); _i++ ) {
+                double E2_2 = 0;
+                for( int _pi = 0; _pi < 3; _pi++ ) {
+                    int p1 = E2_pixels[_i](_pi);
+                    int p2 = texture.at<cv::Vec3b>(j,i)(_pi);
+                    E2_2 += std::pow(p1-p2, 2);
+                }
+                E2_1 += (E2_2 * E2_weights[_i]);
             }
-            E2_1 += (E2_2 * E2_weights[_i]);
+            E2 += (E2_1 / E2_pixels.size());
         }
-        E2 += (E2_1 / E2_pixels.size());
     }
     if(OUTPUT_T_M_INSTANT) {
         cv::imwrite( texturesFiles[texture_id], texture );
@@ -880,13 +915,11 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
     }
 }
 
-void getAlignResults::generateColoredPLY(std::string path)
+/*----------------------------------------------
+ *  Generate PLY
+ * ---------------------------------------------*/
+void getAlignResults::generateColoredPLY(std::string path, std::string filename, std::vector<cv::Mat3b> imgs)
 {
-    cv::glob(targetsPath + "/" + settings.kfRGBMatch, targetsFiles, false);
-    targetsImgs.clear();
-    for( size_t i = 0; i < kfTotal; i++ )
-       targetsImgs.push_back( cv::imread(targetsFiles[i]) );
-
     // create a RGB point cloud
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_rgb(new pcl::PointCloud<pcl::PointXYZRGB>);
     // convert to PointCloud
@@ -901,7 +934,7 @@ void getAlignResults::generateColoredPLY(std::string path)
                 cv::Point3f pi_uv = uvs[t][p];
                 cv::Point2i p_img(std::round(pi_uv.x), std::round(pi_uv.y));
                 if ( pointValid(p_img) && img_valid_mesh[t].at<int>(p_img.y, p_img.x) == i ) {
-                    cv::Vec3b pixel = targetsImgs[t].at<cv::Vec3b>(p_img.y, p_img.x);
+                    cv::Vec3b pixel = imgs[t].at<cv::Vec3b>(p_img.y, p_img.x);
                     pixel_sum += pixel;
                     count += 1;
                 }
@@ -913,9 +946,7 @@ void getAlignResults::generateColoredPLY(std::string path)
             }
         }
     }
-
     // convert to mesh
     pcl::toPCLPointCloud2(*cloud_rgb, mesh.cloud);
-    pcl::io::savePLYFile( path + "/" + "result_T.ply", mesh );
+    pcl::io::savePLYFile( path + "/" + filename, mesh );
 }
-

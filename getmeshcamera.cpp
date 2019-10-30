@@ -5,7 +5,7 @@ getMeshCamera::getMeshCamera(Settings &_settings)
     settings = _settings;
     std::cout << "----- Mesh Generation -----" << std::endl;
 
-    float volume_size = settings.volumeSize;
+    float volume_size = 4.0f;
     Eigen::Vector3f volume(volume_size, volume_size, volume_size);
     pcl::gpu::kinfuLS::KinfuTracker kft(volume, volume_size * 0.8f, settings.originDepthH, settings.originDepthW);
     // lab data  //(527.3f, 527.08f, 323.73f, 277.25f);
@@ -46,12 +46,12 @@ getMeshCamera::getMeshCamera(Settings &_settings)
 
     // save the pcd file
     kft.extractAndSaveWorld();
-    system( ("cp world.pcd " + settings.keyFramesPath + "/" + settings.pcdWorldFile).c_str() );
+    system( ("cp world.pcd " + settings.keyFramesPath + "/world.pcd").c_str() );
     std::cout << "[ PCD File Success ]" << std::endl;
 
     // show the pcd
 //    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
-//    pcl::io::loadPCDFile<pcl::PointXYZ>( keyFramesPath + "/" + settings.pcdWorldFile, *cloud);
+//    pcl::io::loadPCDFile<pcl::PointXYZ>( keyFramesPath + "/world.pcd", *cloud);
 //    pcl::visualization::CloudViewer viewer("DEMO");
 //    viewer.showCloud(cloud);
 //    while(!viewer.wasStopped()){}
@@ -59,9 +59,9 @@ getMeshCamera::getMeshCamera(Settings &_settings)
     // output the ply(point cloud) from the pcd
     //  (when doing the PCL mesh output, the out-of-memory error occurs)
     char buf2[24];
-    sprintf(buf2, "-vs %f", settings.volumeSize);
+    sprintf(buf2, "-vs %f", volume_size);
     std::string str(buf2);
-    system( ("pcl_kinfu_largeScale_mesh_output " + settings.keyFramesPath + "/" + settings.pcdWorldFile + " " + str).c_str() );
+    system( ("pcl_kinfu_largeScale_mesh_output " + settings.keyFramesPath + "/world.pcd" + " " + str).c_str() );
     system( ("cp mesh_1.ply " + settings.keyFramesPath + "/" + settings.plyFile).c_str() );
     std::cout << "[ PLY Success ]" << std::endl;
 
