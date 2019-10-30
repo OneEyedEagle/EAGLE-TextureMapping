@@ -82,7 +82,7 @@ public:
         // valid keyframes ( all are valid if empty)
         kfIndexs = { 1,3,4,5,7,9,11,12 };
 
-        // files necessary under the keyFramesPath folder
+        // necessary files under the keyFramesPath folder
         {
             // key frames' camera positions txt file after running getKeyFrames.cpp
             //  the format is same as the cameraTxtFile
@@ -94,19 +94,19 @@ public:
             plyFile = "mesh_1.ply";
         }
         
-        // if the camera matrix is projection from the world coord to camera coord, set this flag to true,
+        // if the camera matrix is a projection from the world coord to camera coord, set this flag to true,
         //  otherwise, the data is from camera coord to world coord, and inv() will be called.
         camTrajFromWorldToCam = true;
 
-        // the size of patch (patchWidth * patchWidth)
+        // the width and height of a patch
         patchWidth = 5;
 
         // weight the similarity from Si to Ti
         alpha_u = 1;
         // weight the similarity from Ti to Si
-        alpha_v = 0.1;//2;
+        alpha_v = 2;
         // weight the consistency that how much M affects Ti
-        lamda = 2.0;//0.1;
+        lamda = 0.1;
 
         // -----------------
         //  custom
