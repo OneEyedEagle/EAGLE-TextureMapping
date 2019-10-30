@@ -791,23 +791,21 @@ void getAlignResults::getSimilarityTerm(cv::Mat3b S, cv::Mat1i ann_s2t, cv::Mat1
         int j = index / settings.imgW;
         int i = index % settings.imgW;
         int x, y, v;
-        // here, (i,j) is on Si, and (x,y) on Ti
-        // calculating the completeness term
+        // here, (i,j) is on Ti, and (x,y) on Si
         if( i >= settings.imgW - (settings.patchWidth-1) || j >= settings.imgH - (settings.patchWidth-1)) {
             calcSuv(S, i, j, su, i, j, 1);
         } else {
-            v = ann_s2t.at<int>(j, i);
+            v = ann_t2s.at<int>(j, i);
             x = INT_TO_X(v); y = INT_TO_Y(v);
-            calcSuv(S, i, j, su, x, y, settings.patchWidth);
+            calcSuv(S, x, y, su, i, j, settings.patchWidth);
         }
-        // here, (i,j) is on Ti, and (x,y) on Si
-        // calculating the coherence term
+        // here, (i,j) is on Si, and (x,y) on Ti
         if( i >= settings.imgW - (settings.patchWidth-1) || j >= settings.imgH - (settings.patchWidth-1)) {
             calcSuv(S, i, j, sv, i, j, 1);
         } else {
-            v = ann_t2s.at<int>(j, i);
+            v = ann_s2t.at<int>(j, i);
             x = INT_TO_X(v); y = INT_TO_Y(v);
-            calcSuv(S, x, y, sv, i, j, settings.patchWidth);
+            calcSuv(S, i, j, sv, x, y, settings.patchWidth);
         }
     }
 }
