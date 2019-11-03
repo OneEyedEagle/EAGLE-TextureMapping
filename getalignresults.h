@@ -94,6 +94,7 @@ public:
 
     void generateTextures();
     void generateTextureI(size_t texture_id, std::vector<cv::Mat3b> targets);
+    void generateTextureIWithS(size_t texture_id, std::string fullname);
 
     void generateColoredPLY(std::string path, std::string filename, std::vector<cv::Mat3b> imgs);
 };

@@ -588,8 +588,9 @@ void getAlignResults::doIterations()
         std::string texturesResultPath = resultsPath + "/" + newResolution;
         EAGLE::checkPath(texturesResultPath);
         for( size_t i : kfIndexs ){
-            system( ("cp " + texturesFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "M_", "."+settings.rgbNameExt)).c_str() );
+            generateTextureIWithS(i, texturesResultPath+"/" +getImgFilename(i, "S_", "."+settings.rgbNameExt) );
             system( ("cp " + targetsFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "T_", "."+settings.rgbNameExt)).c_str() );
+            system( ("cp " + texturesFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "M_", "."+settings.rgbNameExt)).c_str() );
         }
         LOG( "[ Results at " + newResolution + " Saving Success ]" );
     }
@@ -913,6 +914,50 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
     } else {
         texturesImgs[texture_id] = texture;
     }
+}
+
+/*----------------------------------------------
+ *  Generate Mi with S
+ * ---------------------------------------------*/
+void getAlignResults::generateTextureIWithS(size_t texture_id, std::string fullname)
+{
+    int total = settings.imgH * settings.imgW;
+    cv::Mat3b texture( cv::Size(settings.imgW, settings.imgH) ); // texturesImgs[texture_id]
+#pragma omp parallel for
+    for ( int index = 0; index < total; index++) {
+        int j = index / settings.imgW;
+        int i = index % settings.imgW;
+        cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
+
+        cv::Vec3f sum(0,0,0);
+        float weight = 0, sum_w = 0;
+        cv::Vec3b pixel; bool flag_valid;
+
+        for ( size_t t : kfIndexs ) {
+            flag_valid = true;
+            if ( t == texture_id ) {
+                weight = weights[t].at<float>(p_img.y, p_img.x);
+                pixel = sourcesImgs[t].at<cv::Vec3b>(j, i);
+            } else {
+                cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
+                if ( Xij(2) > 0 ){
+                    cv::Point2i p_img_t = cv::Point2i(Xij(0), Xij(1));
+                    weight = weights[t].at<float>(p_img_t.y, p_img_t.x);
+                    cv::Point2i p_img_ts = imgToScale(p_img_t);
+                    pixel = sourcesImgs[t].at<cv::Vec3b>(p_img_ts.y, p_img_ts.x);
+                } else
+                    flag_valid = false;
+            }
+            if(flag_valid == true) {
+                sum_w += weight;
+                for( int p_i = 0; p_i < 3; p_i++ )
+                    sum(p_i) = sum(p_i) + weight * pixel(p_i);
+            }
+        }
+        for( int p_i = 0; p_i < 3; p_i++ )
+            texture.at<cv::Vec3b>(j, i)(p_i) = std::round( sum(p_i) / sum_w );
+    }
+    cv::imwrite( fullname, texture );
 }
 
 /*----------------------------------------------
