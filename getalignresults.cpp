@@ -858,8 +858,9 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
         int i = index % settings.imgW;
         cv::Point2i p_img = scaleToImg( cv::Point2i(i, j) );
 
+        cv::Vec3f sum(0,0,0);
+        float weight = 0, sum_w = 0;
         cv::Vec3b pixel; bool flag_valid;
-        float weight = 0, sum_r = 0, sum_g = 0, sum_b = 0, sum_w = 0;
 
         // for E2 calculation
         std::vector<cv::Vec3b> E2_pixels;
@@ -882,17 +883,15 @@ void getAlignResults::generateTextureI(size_t texture_id, std::vector<cv::Mat3b>
             }
             if(flag_valid == true) {
                 sum_w += weight;
-                sum_b = sum_b + weight * pixel(0);
-                sum_g = sum_g + weight * pixel(1);
-                sum_r = sum_r + weight * pixel(2);
+                for( int p_i = 0; p_i < 3; p_i++ )
+                    sum(p_i) = sum(p_i) + weight * pixel(p_i);
 
                 E2_pixels.push_back(pixel);
                 E2_weights.push_back(weight);
             }
         }
-        texture.at<cv::Vec3b>(j, i)(0) = std::round( sum_b / sum_w );
-        texture.at<cv::Vec3b>(j, i)(1) = std::round( sum_g / sum_w );
-        texture.at<cv::Vec3b>(j, i)(2) = std::round( sum_r / sum_w );
+        for( int p_i = 0; p_i < 3; p_i++ )
+            texture.at<cv::Vec3b>(j, i)(p_i) = std::round( sum(p_i) / sum_w );
 
         // calculating E2
         if(E2_pixels.size() > 0) {
