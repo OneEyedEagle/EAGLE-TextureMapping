@@ -15,15 +15,23 @@ HEADERS += \
     getalignresults.h \
     getkeyframes.h \
     getmeshcamera.h \
-    settings.h
+    settings.h \
+    rayint/acc/acceleration.h \
+    rayint/acc/bvh_tree.h \
+    rayint/acc/defines.h \
+    rayint/acc/kd_tree.h \
+    rayint/acc/primitives.h \
+    rayint/math/algo.h \
+    rayint/math/defines.h \
+    rayint/math/vector.h
 
 SOURCES += main.cpp \
     getalignresults.cpp \
     getkeyframes.cpp \
     getmeshcamera.cpp
 
-INCLUDEPATH += /home/wsy/EAGLE/EAGLE-TextureMapping/lib
-LIBS += /home/wsy/EAGLE/EAGLE-TextureMapping/lib/libEagle_Utils.so
+INCLUDEPATH += ./rayint ./lib
+LIBS += $$PWD/lib/libEagle_Utils.so
 
 INCLUDEPATH += /usr/local/include/eigen3
 
@@ -38,8 +46,3 @@ INCLUDEPATH += /usr/include/ni /usr/local/cuda-10.1/include /usr/local/include/v
 LIBS += -lpcl_gpu_kinfu_large_scale -lpcl_gpu_containers -lpcl_common -lpcl_features -lpcl_filters -lpcl_io -lpcl_io_ply -lpcl_kdtree -lpcl_visualization
 LIBS += -lpcl_keypoints -lpcl_octree -lpcl_outofcore -lpcl_people -lpcl_recognition -lpcl_registration -lpcl_sample_consensus -lpcl_search -lpcl_segmentation -lpcl_surface -lpcl_tracking
 
-#LIBS += /usr/local/lib/libvtkCommonDataModel-6.3.so \
-#        /usr/local/lib/libvtkCommonCore-6.3.so \
-#        /usr/local/lib/libvtkCommonMath-6.3.so \
-#        /usr/local/lib/libvtkRenderingLOD-6.3.so \
-#        /usr/local/lib/libvtkRenderingCore-6.3.so

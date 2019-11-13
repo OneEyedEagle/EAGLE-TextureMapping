@@ -11,7 +11,7 @@ getMeshCamera::getMeshCamera(Settings &_settings)
     // lab data  //(527.3f, 527.08f, 323.73f, 277.25f);
     kft.setDepthIntrinsics(settings.cameraDFx, settings.cameraDFy, settings.cameraDCx, settings.cameraDCy);
     kft.setDepthTruncationForICP(4.5);
-    kft.setIcpCorespFilteringParams( 0.1f/*meter*/, (float)sin(20.0f / 180 * 3.14159) );
+    kft.setIcpCorespFilteringParams( 0.1f/*meter*/, (float)sin(30.0 / 180 * 3.14159) );
 
     pcl::device::PtrStepSz<const unsigned short> depth;
     pcl::gpu::kinfuLS::KinfuTracker::DepthMap depth_map;
@@ -41,7 +41,7 @@ getMeshCamera::getMeshCamera(Settings &_settings)
     }
     std::cout << "[ Shift Count: " << shiftCount << " ]" << std::endl;
 
-    writeCameraTraj(settings.cameraTxtFile, cameraTrajs);
+    writeCameraTraj(settings.keyFramesPath + "/" + settings.cameraTxtFile, cameraTrajs);
     std::cout << "[ Camera Trajectory Success ]" << std::endl;
 
     // save the pcd file

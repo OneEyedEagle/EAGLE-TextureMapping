@@ -9,18 +9,18 @@
 class Settings
 {
 public:
-    int originImgW, originImgH, originDepthW, originDepthH, imgW, imgH, patchWidth, patchSize;
-    int frameStart, frameEnd, scaleTimes;
-    double scaleFactor, scaleInitW, scaleInitH, alpha_u, alpha_v, lamda;
+    int originImgW, originImgH, originDepthW, originDepthH, imgW, imgH, scaleInitW, scaleInitH;
+    int patchWidth, patchStep, patchSize, frameStart, frameEnd;
+    double scaleFactor, alpha_u, alpha_v, lamda;
+    size_t scaleTimes;
+    std::vector<size_t> kfIndexs, scaleIters;
 
     std::string allFramesPath, cameraTxtFile, camTrajNamePattern;
-    std::string keyFramesPath, patchmatchBinFile, originResolution, kfCameraTxtFile, plyFile;
+    std::string keyFramesPath, kfCameraTxtFile, patchmatchBinFile, originResolution, plyFile;
     std::string rgbNamePattern, dNamePattern, kfRGBNamePattern, kfDNamePattern, rgbNameExt, kfRGBMatch, kfDMatch;
     bool camTrajFromWorldToCam;
-
     float cameraDFx, cameraDFy, cameraDCx, cameraDCy, cameraFx, cameraFy, cameraCx, cameraCy;
     cv::Mat1f cameraK, cameraDK;
-    std::vector<size_t> kfIndexs;
 
     Settings()
     {
@@ -46,12 +46,12 @@ public:
 
         // set the file extension of RGB image (to store the rgb file in Results folder)
         rgbNameExt = "jpg";
-        
+
         // if you already have a ply file, than no need to set these variables to use PCL for getting a ply
         //   (more details can be found in main.cpp)
         {
             // all frames' path
-            allFramesPath = "/home/wsy/TextureRecover/Datas/bloster2";
+            allFramesPath = "/home/wsy/TextureRecover/Datas/bloster2_1";
             // all frames' name pattern
             rgbNamePattern = "%05d." + rgbNameExt;
             dNamePattern = "%05d.png";
@@ -69,7 +69,7 @@ public:
         }
 
         // keyframes' path (where the rgbd images are)
-        keyFramesPath = "/home/wsy/TextureRecover/Results/bloster2_1";
+        keyFramesPath = "/home/wsy/TextureRecover/Results/bloster2_2";
         // keyframes' name pattern
         kfRGBNamePattern = "color_%02d." + rgbNameExt;
         kfRGBMatch = "color_*." + rgbNameExt;
@@ -80,7 +80,7 @@ public:
             kfDMatch = "*_d*";
         }
         // valid keyframes ( all are valid if empty)
-        kfIndexs = { 1,3,4,5,7,9,11,12 };
+        kfIndexs = {0,1,2,3,4,5,6,9,11,12,13};
 
         // necessary files under the keyFramesPath folder
         {
@@ -93,18 +93,26 @@ public:
             // the ply file
             plyFile = "mesh_1.ply";
         }
-        
+
         // if the camera matrix is a projection from the world coord to camera coord, set this flag to true,
         //  otherwise, the data is from camera coord to world coord, and inv() will be called.
+        //  if the cameraTxtFile and the plyFile are from PCL KF, then this should be false.
         camTrajFromWorldToCam = true;
 
+        // scale
+        scaleTimes = 5;
+        scaleIters = {50, 50, 50, 50, 50, 20, 20, 20, 10, 10};
+        scaleInitH = originImgH / 4;
+
         // the width and height of a patch
-        patchWidth = 5;
+        patchWidth = 7;
+        // the step of patchs when voting
+        patchStep = 3;
 
         // weight the similarity from Si to Ti
-        alpha_u = 1;
+        alpha_u = 1.0;
         // weight the similarity from Ti to Si
-        alpha_v = 2;
+        alpha_v = 2.0;
         // weight the consistency that how much M affects Ti
         lamda = 0.1;
 
@@ -117,12 +125,10 @@ public:
         //  init
         // -----------------
         // path of PatchMatch's bin
-        patchmatchBinFile = "/home/wsy/EAGLE/EAGLE-TextureMapping/patchmatch-2.1/eagle_pm_minimal";
+        patchmatchBinFile = "../patchmatch/eagle_pm_minimal_" + std::to_string(patchWidth);
 
         // scale
-        scaleTimes = 10;
-        scaleInitH = 120;
-        scaleInitW = originImgW * 1.0 / originImgH * scaleInitH;
+        scaleInitW = static_cast<int>( std::round(originImgW * scaleInitH * 1.0 / originImgH) );
         scaleFactor = pow( originImgH * 1.0 / scaleInitH, 1.0 / (scaleTimes-1) );
 
         // make the dir
@@ -151,14 +157,18 @@ public:
         cameraCx = 639.5f;
         cameraCy = 511.5f;
 
-        keyFramesPath = "/home/wsy/EAGLE/EAGLE-TextureMapping/datas";
+        keyFramesPath = "../datas";
         rgbNameExt = "jpg";
         kfRGBNamePattern = "%05d." + rgbNameExt;
         kfRGBMatch = "*." + rgbNameExt;
-        kfIndexs = {0,4,6,13};//{0,4,6,13,17,19,21};
+        kfIndexs = {0,1,4,6,12,15,17,21};
         plyFile = "world.ply";
         camTrajFromWorldToCam = false;
+
+        scaleInitH = originImgH / 4;
     }
+
 };
 
 #endif // SETTINGS_H
+
