@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 #include <omp.h>
+#include <cfloat>
+#include <ctime>
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -12,8 +14,6 @@
 #include <pcl/io/ply_io.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
-#include <pcl/kdtree/kdtree_flann.h>
-#include <pcl/features/normal_3d.h>
 #include <pcl/PolygonMesh.h>
 #include <pcl/conversions.h>
 
@@ -34,29 +34,29 @@ public:
     size_t point_num, mesh_num;
     std::vector<cv::Vec3f> vertex_normal;
 
-    std::string sourcesPath; // Si - sources' path
-    std::string targetsPath; // Ti - targets' path
-    std::string texturesPath; // Mi - textures' path
-    std::string resultsPath; // save results with different resolutions
-    std::string pmResultPath; // path to store patchmatch results
+    std::string processPath, resultsPath;
+    std::string sourcesPath, targetsPath, texturesPath, weightsPath;
 
     size_t kfStart, kfTotal;
     std::vector<size_t> kfIndexs;
     std::vector<cv::String> sourcesOrigin; // all sources' full path (with filename and ext)
     std::map<size_t, cv::String> sourcesFiles, targetsFiles, texturesFiles;
     std::map<size_t, cv::Mat3b> sourcesImgs, targetsImgs, texturesImgs;
+    std::map<size_t, cv::Mat> depthImgs;
 
     struct valid_info // a pixel's valid info of the mesh
     {
-        float z = 0; // 0m ~ 1m
+        float depth = 0; // 0m ~ 1m
+        float cos_alpha = 0;
         size_t mesh_id = 0;
-        cv::Vec3f lamda;
     };
     std::map<size_t, std::vector<struct valid_info>> img_valid_info;
     std::map<size_t, cv::Mat> weights;
+    std::map<size_t, cv::Mat> img_valid_patch;
     std::map<size_t, std::map<size_t, cv::Mat>> mappings;
 
     double scaleF;
+    double lamda, patchRandomSearch;
     double E1, E2;
 
     getAlignResults(Settings &_settings);
@@ -65,6 +65,9 @@ public:
 
     std::string getImgFilename(size_t img_i);
     std::string getImgFilename(size_t img_i, std::string pre, std::string ext);
+
+    void readDepthImgs();
+    float getDepth(size_t img_i, int x, int y);
 
     void readCameraTraj(std::string camTraj_file);
     void readCameraTraj();
@@ -83,25 +86,24 @@ public:
     void calcValidMesh();
     typedef acc::BVHTree<unsigned int, math::Vec3f> BVHTree;
     void calcImgValidMesh(size_t img_i, BVHTree &bvhtree);
+    void calcValidPatch();
+    void calcImgValidPatch(size_t img_i);
+    int isPatchValid(size_t img_i, int x, int y);
     void calcRemapping();
     void calcImgRemapping(size_t img_i, size_t img_j);
-    cv::Mat3f calcPosCoord(cv::Point3f uv1, cv::Point3f uv2, cv::Point3f uv3, cv::Rect &pos);
+    void showRemapping();
 
     void doIterations();
 
-    void calcPatchmatch();
-    void patchMatch(std::string imgA_file, std::string imgB_file, std::string ann_raw_file, std::string annd_file);
-    std::string getAnnFilename(size_t img_id, std::string sym);
-    std::string getAnndFilename(size_t img_id, std::string sym);
-    void readAnnTXT(std::string ann_txt_file, cv::Mat1i &result);
-    double calcAnndSum(std::string annd_txt_file);
+    void patchmatch(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Mat3i &ann);
+    void patchmatch_iter(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Mat3i &ann, int dir);
+    void improve_guess(cv::Mat3b a, cv::Mat3b b, int ax, int ay, int &xbest, int &ybest, int &dbest, int bx, int by);
+    int dist(cv::Mat3b a, cv::Mat3b b, int ax, int ay, int bx, int by, int cutoff=INT_MAX);
 
-    void generateTargets();
     void generateTargetI(size_t target_id, std::map<size_t, cv::Mat3b> textures);
-    void getSimilarityTerm(cv::Mat3b S, cv::Mat1i ann_s2t, cv::Mat1i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv);
+    void getSimilarityTerm(cv::Mat3b S, cv::Mat3i ann_s2t, cv::Mat3i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv);
     void calcSuv(cv::Mat3b S, int i, int j, cv::Mat4i &s, int x, int y, int w);
 
-    void generateTextures();
     void generateTextureI(size_t texture_id, std::map<size_t, cv::Mat3b> targets);
     void generateTextureIWithS(size_t texture_id, std::string fullname);
 
@@ -114,5 +116,11 @@ public:
     void generateTexturedOBJ(std::string path, std::string filename, std::string resultImgNamePattern);
     void saveOBJwithMTL(std::string path, std::string filename, std::string resultImgNamePattern, pcl::PointCloud<pcl::PointXYZRGB> cloud, std::vector<cv::Point2f> uv_coords, std::map<size_t, std::vector<struct face_info>> mesh_info);
 };
+
+struct pixel_weight {
+    cv::Vec3b pixel;
+    float weight = 0;
+};
+bool sortPixelWeight(const struct pixel_weight& a, const struct pixel_weight& b);
 
 #endif // GETALIGNRESULTS_H

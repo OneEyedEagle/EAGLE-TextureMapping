@@ -3,16 +3,7 @@
 /*----------------------------------------------
  *  Log Settings
  * ---------------------------------------------*/
-#define LOG_PM     true
-#define LOG_SAVE_T true
-#define LOG_SAVE_M true
 #define OUTPUT_T_M_INSTANT true
-
-/*----------------------------------------------
- *  To get the position of the patchmatch result
- * ---------------------------------------------*/
-#define INT_TO_X(v) ((v)&((1<<12)-1))
-#define INT_TO_Y(v) ((v)>>12)
 
 /*----------------------------------------------
  *  Math
@@ -20,6 +11,7 @@
 #define EPS 1e-10
 #define EAGLE_MAX(x,y) (x > y ? x : y)
 #define EAGLE_MIN(x,y) (x < y ? x : y)
+#define EAGLE_EQU_F(a,b) (fabs(a-b) <= 1e-6)
 
 /*----------------------------------------------
  *  Main
@@ -27,10 +19,7 @@
 getAlignResults::getAlignResults(Settings &_settings)
 {
     settings = _settings;
-    // get all keyframe imgs' full path
-    sourcesPath = settings.keyFramesPath;
-    EAGLE::checkPath(sourcesPath);
-    cv::glob(sourcesPath + "/" + settings.kfRGBMatch, sourcesOrigin, false);
+    cv::glob(settings.keyFramesPath + "/" + settings.kfRGBMatch, sourcesOrigin, false);
     // range of all frames
     kfStart = 0; kfTotal = sourcesOrigin.size();
     // range of valid frames
@@ -41,22 +30,26 @@ getAlignResults::getAlignResults(Settings &_settings)
         for( size_t i = kfStart; i < kfTotal; i++ )
             kfIndexs.push_back(i);
     }
-    // make the dir to store targets
-    targetsPath = sourcesPath + "/targets";
+    // make the dir to store all files
+    processPath = settings.keyFramesPath + "/results_Bi17" + settings.resultsPathSurfix;
+    EAGLE::checkPath(processPath);
+    // make the dir to store processing images
+    sourcesPath = processPath + "/sources";
+    EAGLE::checkPath(sourcesPath);
+    targetsPath = processPath + "/targets";
     EAGLE::checkPath(targetsPath);
-    // make the dir to store textures
-    texturesPath = sourcesPath + "/textures";
+    texturesPath = processPath + "/textures";
     EAGLE::checkPath(texturesPath);
-    // make the dir to store results
-    resultsPath = sourcesPath + "/results";
+    weightsPath = processPath + "/weights";
+    EAGLE::checkPath(weightsPath);
+    // make the dir to store iteration results
+    resultsPath = processPath + "/results";
     EAGLE::checkPath(resultsPath);
-    log.open( resultsPath + "/result.log" );
-    // make the dir to store pm's results
-    pmResultPath = sourcesPath + "/patchmatchs";
-    EAGLE::checkPath(pmResultPath);
-    LOG("[ From Path: " + settings.keyFramesPath + " ] ");
-    LOG("[ Alpha U: " + std::to_string(settings.alpha_u) + " | Alpha V: " + std::to_string(settings.alpha_v) + " | Lambda: " + std::to_string(settings.lamda) + " ] ");
-    LOG("[ Patch Width: " + std::to_string(settings.patchWidth) + " | Patch Step: " + std::to_string(settings.patchStep) + " ]");
+    log.open( resultsPath + "/LOG.log" );
+    LOG("[ From Path: " + settings.keyFramesPath + " ]");
+    LOG("[ To Path: ./results_Bi17" + settings.resultsPathSurfix + " ]" );
+    LOG("[ Alpha U: " + std::to_string(settings.alpha_u) + " | Alpha V: " + std::to_string(settings.alpha_v) + " ] ");
+    LOG("[ Patch Width: " + std::to_string(settings.patchWidth) + " | Patch Step: " + std::to_string(settings.patchStep) + " | Patch Random Search: " + std::to_string(settings.patchRandomSearchTimes) + " ]");
     LOG("[ Scale: " + std::to_string(settings.scaleTimes) + " | From " + std::to_string(settings.scaleInitW) + "x" + std::to_string(settings.scaleInitH) + " to " + std::to_string(settings.originImgW) + "x" + std::to_string(settings.originImgH) + " ]");
 
     //pcl::PolygonMesh mesh;
@@ -70,6 +63,8 @@ getAlignResults::getAlignResults(Settings &_settings)
     pcl::fromPCLPointCloud2(mesh.cloud, cloud_rgb);
     calcNormals();
 
+    readDepthImgs();
+
     // read the camera's world positions of keyframes
     LOG("[ Read Camera Matrixs ] ");
     if ( EAGLE::isFileExist(settings.keyFramesPath + "/" + settings.kfCameraTxtFile) )
@@ -78,8 +73,11 @@ getAlignResults::getAlignResults(Settings &_settings)
         readCameraTraj();
 
     LOG("[ Init Success. " + std::to_string(kfIndexs.size()) + " / " + std::to_string(kfTotal) + " Images " + "]");
+    clock_t start_time = std::clock();
     doIterations();
-    LOG("[ End ]");
+    clock_t end_time = std::clock();
+    double all_seconds = static_cast<double>( (end_time - start_time) / CLOCKS_PER_SEC );
+    LOG("[ Finish in " + std::to_string(all_seconds) + " s ]");
 }
 getAlignResults::~getAlignResults()
 {
@@ -128,6 +126,51 @@ std::string getAlignResults::getImgFilename(size_t img_i, std::string pre, std::
     sprintf(filename, (pre + "%03d" + ext).c_str(), img_i);
     std::string filename_ = filename;
     return filename_;
+}
+
+/*----------------------------------------------
+ *  Depth File
+ * ---------------------------------------------*/
+void getAlignResults::readDepthImgs()
+{
+    char tmp[24];
+    for ( size_t i : kfIndexs ) {
+        sprintf(tmp, (settings.kfDNamePattern).c_str(), i);
+        std::string file = settings.keyFramesPath + "/" + std::string(tmp);
+        if (EAGLE::isFileExist(file))
+            depthImgs[i] = cv::imread(file, CV_LOAD_IMAGE_UNCHANGED);
+    }
+}
+float getAlignResults::getDepth(size_t img_i, int x, int y)
+{
+    if ( depthImgs.empty() == true ) {
+        return -1.0f;
+    }
+    x = static_cast<int>(round(1.0 * x / settings.imgW * settings.originDepthW));
+    y = static_cast<int>(round(1.0 * y / settings.imgH * settings.originDepthH));
+    float v = 0;
+    switch(settings.depthType) {
+    case 'f' :
+        v = depthImgs[img_i].at<float>(y, x);
+        break;
+    case 'i' : {
+        int t_i = depthImgs[img_i].at<int>(y, x);
+        v = static_cast<float>(t_i) * 1.0f / 1000;
+        break;
+    }
+    case 's' : {
+        unsigned short t_u = depthImgs[img_i].at<ushort>(y, x);
+        v = static_cast<float>(t_u) * 1.0f / 1000;
+        break;
+    }
+    case 'b' : {
+        unsigned char t_u = depthImgs[img_i].at<uchar>(y, x);
+        v = static_cast<float>(t_u) * 1.0f / 1000;
+        break;
+    }
+    }
+    //std::cout << "[(" << x << "," << y << ") " << v << "]" << std::flush;
+    return v;
 }
 
 /*----------------------------------------------
@@ -238,6 +281,9 @@ cv::Mat getAlignResults::worldToImg(cv::Mat X_w, size_t id)
     return cameraToImg(X_c);
 }
 
+/*----------------------------------------------
+ *  Valid Check
+ * ---------------------------------------------*/
 // chech if the point is valid under current resolution
 bool getAlignResults::pointValid(int x, int y)
 {
@@ -263,11 +309,15 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
     // check if the point is valid
     if ( !pointValid(x, y) )
         return false;
+    // ground truth depth
+    float depth = getDepth(img_id, x, y);
+    if ( depth > 0 && fabs(static_cast<double>(depth - point_z)) > 0.01 )
+        return false;
     // get the position's valid info
     size_t p_index = static_cast<size_t>(x + y * settings.imgW);
     struct valid_info * info = &img_valid_info[img_id][p_index];
     // check the depth (whether the point is occluded)
-    if ( point_z > info->z + 0.01f )
+    if ( point_z > info->depth + 0.01f )
         return false;
     // check the weight (if the weight is too small, then it's a bad projection)
     if ( weights[img_id].at<float>(y, x) < 0.1f )
@@ -279,38 +329,48 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
 /*----------------------------------------------
  *  Pre-Process
  * ---------------------------------------------*/
-// for each vertex, calculate its normal
-// ( source: https://blog.csdn.net/wolfcsharp/article/details/93711068 )
 void getAlignResults::calcNormals()
 {
     LOG("[ Calculating Normals of each Vertex ]");
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-    pcl::fromPCLPointCloud2(mesh.cloud, *cloud);
-
     //std::vector<cv::Vec3f> vertex_normal(point_num); // vertex id => cv::Vec3f
     vertex_normal.resize(point_num);
+    // store each vertex's total weight angle
+    std::vector<float> vertex_angle(point_num);
 
-    pcl::NormalEstimation<pcl::PointXYZRGB, pcl::Normal> n;
-    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
-    //  using kdtree to search NN
-    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZRGB>);
-    tree->setInputCloud(cloud);
-    n.setInputCloud(cloud);
-    n.setSearchMethod(tree);
-    //  set the NN value
-    n.setKSearch(20);
-    n.compute(*normals);
+    for( size_t i = 0; i < mesh_num; i++ ) {
+        std::vector<cv::Vec3f> v(3);
+        for( size_t v_i = 0; v_i < 3; v_i++ ) {
+            size_t p_i = mesh.polygons[i].vertices[v_i];
+            cv::Vec3f v_(cloud_rgb.points[p_i].x, cloud_rgb.points[p_i].y, cloud_rgb.points[p_i].z);
+            v[v_i] = v_; // store the current mesh's points coords
+        }
+        cv::Vec3f e1 = v[1] - v[0];
+        cv::Vec3f e2 = v[2] - v[1];
+        cv::Vec3f fn = cv::normalize(e1.cross(e2)); // current mesh's normal
 
-    // output the normals
+        // calc the triangle mesh's each vertex's angle
+        double cos_t0 = (v[1] - v[0]).dot(v[2] - v[0]) / cv::norm(v[1] - v[0]) / cv::norm(v[2] - v[0]) * CV_PI / 180.0;
+        double cos_t1 = (v[0] - v[1]).dot(v[2] - v[1]) / cv::norm(v[0] - v[1]) / cv::norm(v[2] - v[1]) * CV_PI / 180.0;
+        double cos_t2 = (v[0] - v[2]).dot(v[1] - v[2]) / cv::norm(v[0] - v[2]) / cv::norm(v[1] - v[2]) * CV_PI / 180.0;
+        double t[3] = {0, 0, 0};
+        t[0] = acos(cos_t0); t[1] = acos(cos_t1); t[2] = acos(cos_t2);
+
+        for( size_t v_i = 0; v_i < 3; v_i++ ) {
+            size_t p_i = mesh.polygons[i].vertices[v_i];
+            vertex_normal[p_i] += fn * t[v_i];
+            vertex_angle[p_i] += static_cast<float>(t[v_i]);
+        }
+    }
+    // normalize normals by angle weights
 #pragma omp parallel for
-    for ( size_t i = 0; i < cloud->points.size(); i++)
-        vertex_normal[i] = cv::Vec3f(normals->points[i].normal_x, normals->points[i].normal_y, normals->points[i].normal_z);
+    for( size_t i = 0; i < point_num; i++ )
+        vertex_normal[i] /= vertex_angle[i];
 }
 
 // calculate valid mesh for each pixel on every image
 void getAlignResults::calcValidMesh()
 {
-    LOG("[ Calculating Depth and Weight of every pixel on each Si ]");
+    LOG("[ Calculating Depth, Distance and Weight ]");
 
     // init ray intersection
     std::vector<unsigned int> faces(mesh_num * 3);
@@ -325,7 +385,6 @@ void getAlignResults::calcValidMesh()
     }
     BVHTree bvhtree(faces, vertices);
 
-    LOG( " Valid Info << ", false );
     img_valid_info.clear(); // pixel_index => valid_info
     weights.clear();
     size_t total = static_cast<size_t>(settings.imgW * settings.imgH);
@@ -336,22 +395,32 @@ void getAlignResults::calcValidMesh()
             struct valid_info info;
             img_valid_info[t][pixel_index] = info;
         }
+        LOG( " " + std::to_string(t) + " << ", false );
         calcImgValidMesh(t, bvhtree);
-        LOG( std::to_string(t) + " ", false );
+        LOG( " ", true );
     }
-    LOG( "<< Done" );
 }
 // using the ray intersection method to get the pixel's depth
 void getAlignResults::calcImgValidMesh(size_t img_i, BVHTree &bvhtree)
 {
+    // calc the camera's position (in world coord)
     cv::Mat cam_c = (cv::Mat_<float>(4, 1) << 0, 0, 0, 1);
     cv::Mat cam_w = cameraToWorld(cam_c, img_i);
     math::Vec3f cam_world_p(cam_w.at<float>(0), cam_w.at<float>(1), cam_w.at<float>(2));
 
+    // calc the camera's direction vector (in world coord)
     cv::Mat cam_v_c = (cv::Mat_<float>(4, 1) << 0, 0, 1, 0);
     cv::Mat cam_v_w = cameraToWorld(cam_v_c, img_i);
     math::Vec3f cam_world_v(cam_v_w.at<float>(0), cam_v_w.at<float>(1), cam_v_w.at<float>(2));
     cam_world_v = cam_world_v.normalized();
+
+    float depth_min = FLT_MAX;
+    float depth_max = 0.0;
+    float d2_min = FLT_MAX;
+    float d2_max = 0.0;
+    float weight_min = FLT_MAX;
+    float weight_max = 0.0;
+    cv::Mat1f depth_f(settings.imgH, settings.imgW, 0.0f);
 
     size_t total = static_cast<size_t>(settings.imgW * settings.imgH);
     for ( size_t pixel_index = 0; pixel_index < total; pixel_index++) {
@@ -374,28 +443,104 @@ void getAlignResults::calcImgValidMesh(size_t img_i, BVHTree &bvhtree)
             // its points ids:  hit.idx * 3 + 0, hit.idx * 3 + 1, hit.idx * 3 + 2
             info->mesh_id = hit.idx;
 
-            math::Vec3f const & w = hit.bcoords;
-            info->lamda = cv::Vec3f( w(0), w(1), w(2) );
+            float depth = cam_world_v.dot(hit.t * ray.dir);
+            info->depth = depth;
+            depth_f.at<float>(y,x) = depth;
+            if ( depth < depth_min )
+                depth_min = depth;
+            if ( depth > depth_max )
+                depth_max = depth;
 
-            float z = cam_world_v.dot(hit.t * ray.dir);
-            info->z = z;
+            math::Vec3f const & w = hit.bcoords; // cv::Vec3f( w(0), w(1), w(2) );
+            size_t v1_id = mesh.polygons[info->mesh_id].vertices[0];
+            size_t v2_id = mesh.polygons[info->mesh_id].vertices[1];
+            size_t v3_id = mesh.polygons[info->mesh_id].vertices[2];
 
-            // calc weight
-            cv::Vec3f n1 = vertex_normal[ mesh.polygons[hit.idx].vertices[0] ];
-            cv::Vec3f n2 = vertex_normal[ mesh.polygons[hit.idx].vertices[1] ];
-            cv::Vec3f n3 = vertex_normal[ mesh.polygons[hit.idx].vertices[2] ];
+            // calc world position
+            float _x = cloud_rgb.points[v1_id].x * w(0) + cloud_rgb.points[v2_id].x * w(1) + cloud_rgb.points[v3_id].x * w(2);
+            float _y = cloud_rgb.points[v1_id].y * w(0) + cloud_rgb.points[v2_id].y * w(1) + cloud_rgb.points[v3_id].y * w(2);
+            float _z = cloud_rgb.points[v1_id].z * w(0) + cloud_rgb.points[v2_id].z * w(1) + cloud_rgb.points[v3_id].z * w(2);
+            float d2 = (cam_world_p(0)-_x)*(cam_world_p(0)-_x) + (cam_world_p(1)-_y)*(cam_world_p(1)-_y) + (cam_world_p(2)-_z)*(cam_world_p(2)-_z);
+            if ( d2 < d2_min )
+                d2_min = d2;
+            if ( d2 > d2_max )
+                d2_max = d2;
+
+            // calc normal
+            cv::Vec3f n1 = vertex_normal[ v1_id ];
+            cv::Vec3f n2 = vertex_normal[ v2_id ];
+            cv::Vec3f n3 = vertex_normal[ v3_id ];
             math::Vec3f normal;
             normal(0) = n1(0) * w(0) + n2(0) * w(1) + n3(0) * w(2);
             normal(1) = n1(1) * w(0) + n2(1) * w(1) + n3(1) * w(2);
             normal(2) = n1(2) * w(0) + n2(2) * w(1) + n3(2) * w(2);
             normal = normal.normalize();
-
             math::Vec3f vert2view = -ray.dir;
             float cos_alpha = -vert2view.dot(normal); // the cos of angle between camera dir and vertex normal
-            float weight = cos_alpha * cos_alpha / (z * z);
+            info->cos_alpha = cos_alpha;
+
+            float weight = cos_alpha * cos_alpha / d2;
             weights[img_i].at<float>(y, x) = weight;
+            if ( weight > weight_max )
+                weight_max = weight;
+            if ( weight < weight_min && weight > 0 )
+                weight_min = weight;
         }
     }
+    LOG("depth: " + std::to_string(sqrt(depth_min)) + " to " + std::to_string(sqrt(depth_max)) + " | ", false );
+    LOG("d: " + std::to_string(sqrt(d2_min)) + " to " + std::to_string(sqrt(d2_max)), false );
+
+#pragma omp parallel for
+    for ( size_t pixel_index = 0; pixel_index < total; pixel_index++) {
+        int y = static_cast<int>(pixel_index) / settings.imgW;
+        int x = static_cast<int>(pixel_index) % settings.imgW;
+        weights[img_i].at<float>(y, x) *= d2_min; // normalize the distance
+    }
+
+    cv::Mat weight_out;
+    weights[img_i].convertTo(weight_out, CV_8UC1, 255, 0);
+    cv::imwrite(weightsPath + "/weight_"+std::to_string(img_i)+".png", weight_out);
+}
+
+// calculate valid patch to accelerate the patchmatch
+void getAlignResults::calcValidPatch()
+{
+    LOG("[ Select valid patchs ]");
+    LOG( " Valid Patch << ", false );
+    img_valid_patch.clear(); // pixel_index => valid_info
+    for( size_t t : kfIndexs ) {
+        img_valid_patch[t] = cv::Mat1i(settings.imgH, settings.imgW);
+        calcImgValidPatch(t);
+        LOG( std::to_string(t) + " ", false );
+    }
+    LOG( "<< Done" );
+}
+void getAlignResults::calcImgValidPatch(size_t img_i)
+{
+    size_t total = static_cast<size_t>(settings.imgW * settings.imgH);
+#pragma omp parallel for
+    for ( size_t pixel_index = 0; pixel_index < total; pixel_index++) {
+        int y = static_cast<int>(pixel_index) / settings.imgW;
+        int x = static_cast<int>(pixel_index) % settings.imgW;
+        int result = 0;
+        if( x < settings.imgW - settings.patchWidth + 1 && y < settings.imgH - settings.patchWidth + 1 )
+            result = isPatchValid(img_i, x, y);
+        img_valid_patch[img_i].at<int>(y, x) = result;
+    }
+}
+int getAlignResults::isPatchValid(size_t img_i, int x, int y)
+{
+    for ( int i = 0; i < settings.patchWidth; i++ ) {
+        if ( weights[img_i].at<float>(y, x + i) > 0 ||
+             weights[img_i].at<float>(y + settings.patchWidth-1, x + i) > 0 )
+            return 1; // valid patch;
+    }
+    for ( int j = 1; j < settings.patchWidth - 1; j++ ) {
+        if ( weights[img_i].at<float>(y + j, x) > 0 ||
+             weights[img_i].at<float>(y + j, x + settings.patchWidth-1) > 0 )
+            return 1; // valid patch;
+    }
+    return 0;
 }
 
 // for every triangle mesh, do projection from i to j
@@ -417,20 +562,21 @@ void getAlignResults::calcRemapping()
         }
         LOG( "<< Done" );
     }
+    showRemapping();
 }
 // for each pixel in img_i, remapping it to img_j only when the mesh is visible both in i and j
 void getAlignResults::calcImgRemapping(size_t img_i, size_t img_j)
 {
     size_t total = static_cast<size_t>(settings.imgW * settings.imgH);
-//#pragma omp parallel for
+#pragma omp parallel for
     for ( size_t pixel_index = 0; pixel_index < total; pixel_index++) {
-        int y = static_cast<int>(pixel_index) / settings.imgW;
-        int x = static_cast<int>(pixel_index) % settings.imgW;
-
+        // if no depth, then no need to remapping
         struct valid_info * info = &img_valid_info[img_i][pixel_index];
-        if( info->z <= 0 )
+        if( info->depth <= 0 )
             continue;
 
+        int y = static_cast<int>(pixel_index) / settings.imgW;
+        int x = static_cast<int>(pixel_index) % settings.imgW;
         if( img_i == img_j ){
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(0) = x;
             mappings[img_i][img_j].at<cv::Vec3i>(y, x)(1) = y;
@@ -438,15 +584,42 @@ void getAlignResults::calcImgRemapping(size_t img_i, size_t img_j)
             continue;
         }
 
-        cv::Mat p_w = imgToWorld(x, y, info->z, img_i);
+        cv::Mat p_w = imgToWorld(x, y, info->depth, img_i);
         cv::Mat p_j = worldToImg(p_w, img_j);
-        cv::Point2i p_img_j( static_cast<int>(round(p_j.at<float>(0))), static_cast<int>(round(p_j.at<float>(1))));
+        cv::Point2i p_img_j;
+        p_img_j.x = static_cast<int>( round(p_j.at<float>(0)) );
+        p_img_j.y = static_cast<int>( round(p_j.at<float>(1)) );
         if ( !pointProjectionValid(p_j.at<float>(2), img_j, p_img_j.x, p_img_j.y) )
             continue;
 
         mappings[img_i][img_j].at<cv::Vec3i>(y, x)(0) = p_img_j.x;
         mappings[img_i][img_j].at<cv::Vec3i>(y, x)(1) = p_img_j.y;
         mappings[img_i][img_j].at<cv::Vec3i>(y, x)(2) = 1;
+    }
+}
+void getAlignResults::showRemapping()
+{
+    size_t total = static_cast<size_t>(settings.imgW * settings.imgH);
+    for( size_t img_i : kfIndexs) {
+        cv::Mat1d mat( settings.imgH, settings.imgW );
+        for ( size_t pixel_index = 0; pixel_index < total; pixel_index++) {
+            int y = static_cast<int>(pixel_index) / settings.imgW;
+            int x = static_cast<int>(pixel_index) % settings.imgW;
+            mat.at<double>(y, x) = 0;
+            for( size_t img_j : kfIndexs ) {
+                if( mappings[img_i][img_j].at<cv::Vec3i>(y, x)(2) == 1 )
+                    mat.at<double>(y, x) += 1;
+            }
+        }
+#pragma omp parallel for
+        for ( size_t pixel_index = 0; pixel_index < total; pixel_index++) {
+            int y = static_cast<int>(pixel_index) / settings.imgW;
+            int x = static_cast<int>(pixel_index) % settings.imgW;
+            mat.at<double>(y, x) = mat.at<double>(y, x) * 1.0 / kfIndexs.size();
+        }
+        cv::Mat mat_out;
+        mat.convertTo(mat_out, CV_8UC1, 255, 0);
+        cv::imwrite(weightsPath + "/remap_"+std::to_string(img_i)+".png", mat_out);
     }
 }
 
@@ -458,37 +631,30 @@ void getAlignResults::doIterations()
     size_t scale = 0;
 //    scale = settings.scaleTimes-1;
     bool init_T_M = true;
+    char tmp_[16]; sprintf(tmp_, "%dx%d", settings.originImgW, settings.originImgH);
+    std::string originResolution(tmp_);
     for ( ; scale < settings.scaleTimes; scale++) {
         // downsample imgs
         settings.imgW = static_cast<int>(std::round(settings.scaleInitW * 1.0 * pow(settings.scaleFactor, scale)));
         settings.imgH = static_cast<int>(std::round(settings.scaleInitH * 1.0 * pow(settings.scaleFactor, scale)));
         scaleF = settings.originImgW * 1.0 / settings.imgW;
 
-        char tmp[10];
-        sprintf(tmp, "%dx%d", settings.imgW, settings.imgH);
-        std::string newResolution(tmp);
-        LOG("[ Scale to " + newResolution + " ]");
+        lamda = settings.lamda;
+        patchRandomSearch = settings.patchRandomSearchTimes;
 
-        // get all keyframes' full path (after scale)
-        sourcesPath = settings.keyFramesPath + "/" + newResolution;
-        EAGLE::checkPath(sourcesPath);
+        char tmp[10]; sprintf(tmp, "%dx%d", settings.imgW, settings.imgH);
+        std::string newResolution(tmp);
+        LOG("[ Scale to " + newResolution + " (" + std::to_string(scale+1) + ") ]");
+        LOG("[ Lamda: " + std::to_string(lamda) + " ]");
+
         // generate source imgs with new resolution // [REQUIRE] ImageMagick
         sourcesImgs.clear();
         for( size_t i : kfIndexs ) {
             std::string filename = EAGLE::getFilename(sourcesOrigin[i]);
             sourcesFiles[i] = sourcesPath + "/" + filename;
             system( ("convert " + sourcesOrigin[i] + " -resize " + newResolution + "! " + sourcesFiles[i]).c_str() );
-            // read Si
-            sourcesImgs[i] = cv::imread(sourcesFiles[i]); // img.at<cv::Vec3b>(y, x)(0)
+            sourcesImgs[i] = cv::imread(sourcesFiles[i]);
         }
-
-        // using ray intersection method to get all pixels' depth and weight
-        calcValidMesh();
-//        break;
-
-        // doing the remapping to project a pixel to other views
-        calcRemapping();
-
         // init Ti and Mi or upsample
         if ( init_T_M == true ) {
             for( size_t i : kfIndexs ) {
@@ -500,30 +666,51 @@ void getAlignResults::doIterations()
             }
             init_T_M = false;
         }else{
-            for( size_t i : kfIndexs ){
-                // [REQUIRE] ImageMagick
+            for( size_t i : kfIndexs ){ // [REQUIRE] ImageMagick
                 system( ("convert " + targetsFiles[i] + " -resize " + newResolution + "! " + targetsFiles[i]).c_str() );
                 system( ("convert " + texturesFiles[i] + " -resize " + newResolution + "! " + texturesFiles[i]).c_str() );
             }
         }
 
+        // using ray intersection method to get all pixels' depth and weight
+        calcValidMesh();
+        // calculate relative patchs to speed up the patchmatch
+        calcValidPatch();
+        // doing the remapping to project a pixel to other views
+        calcRemapping();
+
+        // do iterations
         if( ! OUTPUT_T_M_INSTANT) {
-            targetsImgs.clear();
-            texturesImgs.clear();
+            targetsImgs.clear(); texturesImgs.clear();
             for( size_t i : kfIndexs ) {
                 targetsImgs[i] = cv::imread(targetsFiles[i]);
                 texturesImgs[i] = cv::imread(texturesFiles[i]);
             }
         }
-
-        // do iterations
         for ( size_t _count = 0; _count < settings.scaleIters[scale]; _count++) {
             LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]");
-            calcPatchmatch();
-            generateTargets();
-            generateTextures();
+            E1 = 0; E2 = 0;
+            LOG( " T << ", false );
+            if( OUTPUT_T_M_INSTANT ){
+                texturesImgs.clear();
+                for( size_t i : kfIndexs ) { texturesImgs[i] = cv::imread(texturesFiles[i]); }
+            }
+            for( size_t i : kfIndexs ) {
+                generateTargetI(i, texturesImgs);
+                LOG(std::to_string(i) + " ", false);
+            }
+            LOG( "<< E1: " + std::to_string(E1), true );
+            LOG( " M << ", false );
+            if( OUTPUT_T_M_INSTANT ) {
+                targetsImgs.clear();
+                for( size_t i : kfIndexs ) { targetsImgs[i] = cv::imread(targetsFiles[i]); }
+            }
+            for( size_t i : kfIndexs ) {
+                generateTextureI(i, targetsImgs);
+                LOG(std::to_string(i) + " ", false);
+            }
+            LOG( "<< E2: " + std::to_string(E2), true );
         }
-
         if( ! OUTPUT_T_M_INSTANT)
             for( size_t i : kfIndexs ){
                 cv::imwrite( targetsFiles[i], targetsImgs[i] );
@@ -531,194 +718,213 @@ void getAlignResults::doIterations()
             }
 
         // save results
-        std::string texturesResultPath = resultsPath + "/" + newResolution;
-        EAGLE::checkPath(texturesResultPath);
         for( size_t i : kfIndexs ){
-            generateTextureIWithS(i, texturesResultPath+"/" +getImgFilename(i, "S_", "."+settings.rgbNameExt) );
-            system( ("cp " + targetsFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "T_", "."+settings.rgbNameExt)).c_str() );
-            system( ("cp " + texturesFiles[i] + " " + texturesResultPath+"/" + getImgFilename(i, "M_", "."+settings.rgbNameExt)).c_str() );
+            // [REQUIRE] ImageMagick
+            system( ("convert " + targetsFiles[i] + " -resize " + originResolution + "! " + resultsPath+"/"+getImgFilename(i, "T_", "_"+std::to_string(scale+1)+"."+settings.rgbNameExt)).c_str() );
+            system( ("convert " + texturesFiles[i] + " -resize " + originResolution + "! " + resultsPath+"/"+getImgFilename(i, "M_", "_"+std::to_string(scale+1)+"."+settings.rgbNameExt)).c_str() );
         }
-
         LOG( "[ Results at " + newResolution + " Saving Success ]" );
     }
-    char tmp[16]; sprintf(tmp, "%dx%d", settings.originImgW, settings.originImgH);
-    std::string finalResolution(tmp);
-    LOG("[ Generate OBJ file at " + finalResolution + " ]");
-    generateTexturedOBJ(resultsPath + "/" + finalResolution, "S", "S_%03d");
-    generateTexturedOBJ(resultsPath + "/" + finalResolution, "T", "T_%03d");
-    generateTexturedOBJ(resultsPath + "/" + finalResolution, "M", "M_%03d");
+    for( size_t i : kfIndexs ) {
+        std::string s_file = resultsPath+"/" +getImgFilename(i, "S_", "."+settings.rgbNameExt);
+        generateTextureIWithS(i, s_file);
+        system( ("convert " + s_file + " -resize " + originResolution + "! " + s_file).c_str() );
+    }
+    generateTexturedOBJ(resultsPath, "S", "S_%03d");
+    //generateTexturedOBJ(resultsPath, "T", "T_%03d_"+std::to_string(settings.scaleTimes));
+    generateTexturedOBJ(resultsPath, "M", "M_%03d_"+std::to_string(settings.scaleTimes));
+    LOG("[ Generate OBJ file Success ]");
 }
 
 /*----------------------------------------------
  *  PatchMatch
  * ---------------------------------------------*/
-void getAlignResults::calcPatchmatch()
+void getAlignResults::patchmatch(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Mat3i &ann)
 {
-    if(LOG_PM)
-        LOG( " Patchmatchs << ", false );
-    std::string source_file, target_file, ann_file, annd_file;
-    for (size_t i : kfIndexs) {
-        source_file = sourcesFiles[i];
-        target_file = targetsFiles[i];
-
-        ann_file = pmResultPath + "/" + getAnnFilename(i, "s2t.jpg");
-        annd_file = pmResultPath + "/" + getAnndFilename(i, "s2t.jpg");
-        patchMatch(source_file, target_file, ann_file, annd_file);
-
-        ann_file = pmResultPath + "/" + getAnnFilename(i, "t2s.jpg");
-        annd_file = pmResultPath + "/" + getAnndFilename(i, "t2s.jpg");
-        patchMatch(target_file, source_file, ann_file, annd_file);
-
-        if(LOG_PM)
-            LOG( std::to_string(i) + " ", false);
+    int total = settings.imgH * settings.imgW;
+#pragma omp parallel for
+    for ( int index = 0; index < total; index++) {
+        int j = index / settings.imgW;
+        int i = index % settings.imgW;
+        ann.at<cv::Vec3i>(j, i) = cv::Vec3i(i, j, 0);
+        if( i < settings.imgW - settings.patchWidth + 1 && j < settings.imgH - settings.patchWidth + 1 )
+            ann.at<cv::Vec3i>(j, i)(2) = dist(a, b, i, j, i, j, INT_MAX);
     }
-    if(LOG_PM)
-        LOG( "<< Done" );
+    patchmatch_iter(img_id, a, b, ann, 0);
+    patchmatch_iter(img_id, a, b, ann, 1);
+    patchmatch_iter(img_id, a, b, ann, 0);
+    patchmatch_iter(img_id, a, b, ann, 1);
+    patchmatch_iter(img_id, a, b, ann, 0);
+    patchmatch_iter(img_id, a, b, ann, 1);
 }
-void getAlignResults::patchMatch(std::string imgA_file, std::string imgB_file, std::string ann_file, std::string annd_file)
+void getAlignResults::patchmatch_iter(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Mat3i &ann, int dir)
 {
-    // bin imageA_filename imageB_filename ann_img_filename annd_img_filename
-    std::string buf = settings.patchmatchBinFile + " " + imgA_file + " " + imgB_file + " " + ann_file + " " + annd_file;
-    system( buf.c_str() );
-}
-// img_file = "/home/wsy/EAGLE/00000.jpg"
-// sym = "s2t.jpg"
-//  return "/home/wsy/EAGLE/00000_s2t.jpg"
-std::string getAlignResults::getAnnFilename(size_t img_id, std::string sym)
-{
-    return std::to_string(img_id) + "_ann_" + sym;
-}
-// img_file = "/home/wsy/EAGLE/00001.jpg"
-// sym = "t2s.jpg"
-//  return "/home/wsy/EAGLE/00001_t2s.jpg"
-std::string getAlignResults::getAnndFilename(size_t img_id, std::string sym)
-{
-    return std::to_string(img_id) + "_annd_" + sym;
-}
-// ann_txt_file = "/home/wsy/EAGLE/00000_s2t.txt"
-// cv::Mat1i result(480, 640) // for 640X480 img to store the ANN result of PatchMatch
-void getAlignResults::readAnnTXT(std::string ann_txt_file, cv::Mat1i &result)
-{
-    std::ifstream infile(ann_txt_file.c_str(), std::ios::in | std::ios::binary);
-    if ( !infile.is_open() ) {
-      LOG("!!! Open file [" + ann_txt_file + "] failed!");
-      return;
+    int aew = settings.imgW - settings.patchWidth + 1, aeh = settings.imgH - settings.patchWidth + 1;
+    int bew = aew, beh = aeh;
+    int total_pm = aew * aeh;
+    // Set search window when random searching
+    int window_width = static_cast<int>( round(patchRandomSearch * sqrt(settings.imgW * settings.imgH)) );
+
+    int xchange, ychange;
+    if(dir == 0) { // from left-up to right-down
+        xchange = -1;
+        ychange = -1;
+    } else { // from right-down to left-up
+        xchange = 1;
+        ychange = 1;
     }
-    for( int j = 0; j < result.size().height; j++ ){
-        for( int i = 0; i < result.size().width; i++ ){
-            infile >> result.at<int>(j, i);
+    srand( static_cast<uint>(time(nullptr)) );
+
+//#pragma omp parallel for
+    for ( int index = 0; index < total_pm; index++) {
+        int ax, ay, bx, by;
+        if(dir == 0) {
+            ay = index / aew;
+            ax = index % aew;
+        } else {
+            ay = aeh-1 - index / aew;
+            ax = aew-1 - index % aew;
         }
+        // if it's not a valid patch, then continue
+        if (img_valid_patch[img_id].at<int>(ay, ax) == 0)
+            continue;
+
+        /* Current (best) guess. */
+        int xbest = ann.at<cv::Vec3i>(ay, ax)(0);
+        int ybest = ann.at<cv::Vec3i>(ay, ax)(1);
+        int dbest = ann.at<cv::Vec3i>(ay, ax)(2);
+
+        /* Propagation: Improve current guess by trying instead correspondences from left and above (below and right on odd iterations). */
+        int ax2 = ax + xchange;
+        if (ax2 > -1 && ax2 < aew) {
+            bx = ann.at<cv::Vec3i>(ay, ax2)(0) - xchange;
+            by = ann.at<cv::Vec3i>(ay, ax2)(1);
+            if (bx > -1 && bx < bew)
+                improve_guess(a, b, ax, ay, xbest, ybest, dbest, bx, by);
+        }
+        int ay2 = ay + ychange;
+        if (ay2 > -1 && ay2 < aeh) {
+            bx = ann.at<cv::Vec3i>(ay2, ax)(0);
+            by = ann.at<cv::Vec3i>(ay2, ax)(1) - ychange;
+            if (by > -1 && by < beh)
+                improve_guess(a, b, ax, ay, xbest, ybest, dbest, bx, by);
+        }
+
+        /* Random search: Improve current guess by searching in boxes of exponentially decreasing size around the current best guess. */
+        for (int mag = window_width; mag >= 1; mag /= 2) {
+            int xmin = MAX(xbest-mag, 0), xmax = MIN(xbest+mag+1, bew);
+            int ymin = MAX(ybest-mag, 0), ymax = MIN(ybest+mag+1, beh);
+            bx = xmin + rand() % (xmax - xmin);
+            by = ymin + rand() % (ymax - ymin);
+            improve_guess(a, b, ax, ay, xbest, ybest, dbest, bx, by);
+        }
+
+        ann.at<cv::Vec3i>(ay, ax)(0) = xbest;
+        ann.at<cv::Vec3i>(ay, ax)(1) = ybest;
+        ann.at<cv::Vec3i>(ay, ax)(2) = dbest;
     }
-    infile.close();
 }
-double getAlignResults::calcAnndSum(std::string annd_txt_file)
+void getAlignResults::improve_guess(cv::Mat3b a, cv::Mat3b b, int ax, int ay, int &xbest, int &ybest, int &dbest, int bx, int by)
 {
-    std::ifstream infile(annd_txt_file.c_str(), std::ios::in | std::ios::binary);
-    if ( !infile.is_open() ) {
-      LOG("!!! Open file [" + annd_txt_file + "] failed !!!");
-      return 0;
+    int d = dist(a, b, ax, ay, bx, by, dbest);
+    if (d < dbest) {
+        dbest = d;
+        xbest = bx;
+        ybest = by;
     }
-    double result = 0;
-    int v = 0;
-    while( ! infile.eof() ) {
-        infile >> v;
-        result += (v * 1.0 / settings.patchSize);
+}
+int getAlignResults::dist(cv::Mat3b a, cv::Mat3b b, int ax, int ay, int bx, int by, int cutoff)
+{
+    int ans = 0;
+    for ( int index = 0; index < settings.patchSize; index++) {
+        int j = index / settings.patchWidth;
+        int i = index % settings.patchWidth;
+        cv::Vec3b p_a = a.at<cv::Vec3b>(ay+j, ax+i);
+        cv::Vec3b p_b = b.at<cv::Vec3b>(by+j, bx+i);
+        for(int p_i = 0; p_i < 3; p_i++) {
+            int d = static_cast<int>(p_a(p_i)) - static_cast<int>(p_b(p_i));
+            ans += d * d;
+        }
+        if (ans >= cutoff)
+            return cutoff;
     }
-    infile.close();
-    return result;
+    return ans;
 }
 
 /*----------------------------------------------
- *  Generate Tis
+ *  Generate Ti
  * ---------------------------------------------*/
-void getAlignResults::generateTargets()
-{
-    E1 = 0;
-    if(LOG_SAVE_T)
-        LOG( " Targets << ", false );
-    if(OUTPUT_T_M_INSTANT){
-        texturesImgs.clear();
-        for( size_t i : kfIndexs )
-            texturesImgs[i] = cv::imread(texturesFiles[i]);
-    }
-    for( size_t i : kfIndexs ) {
-        generateTargetI(i, texturesImgs);
-        if(LOG_SAVE_T)
-            LOG( std::to_string(i) + " ", false);
-    }
-    if(LOG_SAVE_T)
-        LOG( "<< Done << E1: " + std::to_string(E1) );
-}
 void getAlignResults::generateTargetI(size_t target_id, std::map<size_t, cv::Mat3b> textures)
 {
     int total = settings.imgH * settings.imgW;
     cv::Mat3b target( cv::Size(settings.imgW, settings.imgH) );
 
-    // similarity term
-    cv::Mat1i result_ann_s2t( settings.imgH, settings.imgW );
-    readAnnTXT( pmResultPath + "/" + getAnnFilename(target_id, "s2t.txt"), result_ann_s2t);
-    cv::Mat1i result_ann_t2s( settings.imgH, settings.imgW );
-    readAnnTXT( pmResultPath + "/" + getAnnFilename(target_id, "t2s.txt"), result_ann_t2s);
+    // patchmatch
+    cv::Mat3b sourceImg = sourcesImgs[target_id];
+    cv::Mat3b targetImg = cv::imread(targetsFiles[target_id]);
+    cv::Mat3i result_ann_s2t( settings.imgH, settings.imgW ); // cv::Vec3i(x, y, d)
+    patchmatch(target_id, sourceImg, targetImg, result_ann_s2t);
+    cv::Mat3i result_ann_t2s( settings.imgH, settings.imgW );
+    patchmatch(target_id, targetImg, sourceImg, result_ann_t2s);
     cv::Mat4i result_su( cv::Size(settings.imgW, settings.imgH) );
     cv::Mat4i result_sv( cv::Size(settings.imgW, settings.imgH) );
-#pragma omp parallel for
-    for ( int index = 0; index < total; index++) {
-        int j = index / settings.imgW;
-        int i = index % settings.imgW;
-        result_su.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
-        result_sv.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
-    }
-    getSimilarityTerm(sourcesImgs[target_id], result_ann_s2t, result_ann_t2s, result_su, result_sv);
+    getSimilarityTerm(sourceImg, result_ann_s2t, result_ann_t2s, result_su, result_sv);
 
     // calculate E1
-    double E1_1 = calcAnndSum( pmResultPath + "/" + getAnndFilename(target_id, "s2t.txt") );
-    double E1_2 = calcAnndSum( pmResultPath + "/" + getAnndFilename(target_id, "t2s.txt") );
-    E1 += (settings.alpha_u * E1_1 + settings.alpha_v * E1_2);
+    double E1_1 = 0, E1_2 = 0;
+#pragma omp parallel for
+    for ( int index = 0; index < total; index++) {
+        int j = index / settings.imgW;
+        int i = index % settings.imgW;
+        if( i >= settings.imgW - (settings.patchWidth-1) || j >= settings.imgH - (settings.patchWidth-1))
+            continue;
+        E1_1 += result_ann_s2t.at<cv::Vec3i>(j, i)(2) * 1.0 / settings.patchSize;
+        E1_2 += result_ann_t2s.at<cv::Vec3i>(j, i)(2) * 1.0 / settings.patchSize;
+    }
+    E1 += (settings.alpha_u * E1_1 + settings.alpha_v * E1_2) / 65025;
 
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
-        cv::Point2i p_img = cv::Point2i(i, j);
-
         // if the pixel is in bg, then no optimization
-        cv::Vec3i Xij = mappings[target_id][target_id].at<cv::Vec3i>(p_img.y, p_img.x);
+        cv::Vec3i Xij = mappings[target_id][target_id].at<cv::Vec3i>(j, i);
         if ( Xij(2) == 0 ) {
             target.at<cv::Vec3b>(j, i) = sourcesImgs[target_id].at<cv::Vec3b>(j, i);
             continue;
         }
-
-        double _factor1, _factor2; cv::Vec3d sum_bgr(0,0,0);
+        cv::Vec3d sum_bgr(0,0,0);
 
         // similarity term
-        cv::Vec3d sum_S(0,0,0);
+        double _factor1;
         _factor1  = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
         _factor1 += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(3) / settings.patchSize;
+        cv::Vec3d sum_S(0,0,0);
         for( int p_i = 0; p_i < 3; p_i++ ) {
-            sum_S(p_i) += settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
+            sum_S(p_i)  = settings.alpha_u * result_su.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
             sum_S(p_i) += settings.alpha_v * result_sv.at<cv::Vec4i>(j,i)(p_i) / settings.patchSize;
             sum_bgr(p_i) = sum_S(p_i);
         }
 
         // consistency term
-        cv::Vec3i sum_M(0,0,0); int count_M = 0;
-        double weight = static_cast<double>(weights[target_id].at<float>(p_img.y, p_img.x));
-        _factor2 = settings.lamda * weight;
+        double weight = static_cast<double>(weights[target_id].at<float>(j, i));
+        double _factor2 = lamda * weight;
+        cv::Vec3f sum_M(0,0,0); float sum_w = 0.0f;
         for( size_t t : kfIndexs ) {
             if ( t == target_id ) {
-                sum_M += textures[t].at<cv::Vec3b>(j, i);
-                count_M += 1;
+                float w = weights[t].at<float>(j, i);
+                sum_M += textures[t].at<cv::Vec3b>(j, i) * w;
+                sum_w += w;
             } else {
-                cv::Vec3i Xij = mappings[target_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
+                cv::Vec3i Xij = mappings[target_id][t].at<cv::Vec3i>(j, i);
                 if ( Xij(2) > 0 ){
-                    cv::Point2i p_img_t(cv::Point2i(Xij(0), Xij(1)));
-                    sum_M += textures[t].at<cv::Vec3b>(p_img_t.y, p_img_t.x);
-                    count_M += 1;
+                    float w = weights[t].at<float>(Xij(1), Xij(0));
+                    sum_M += textures[t].at<cv::Vec3b>(Xij(1), Xij(0)) * w;
+                    sum_w += w;
                 }
             }
         }
-        for ( int p_i = 0; p_i < 3; p_i++ )
-          sum_bgr(p_i) += _factor2 * sum_M(p_i) / count_M;
+        sum_bgr += _factor2 * sum_M / sum_w;
 
         // generate the pixel of Ti
         cv::Vec3b bgr(0,0,0);
@@ -734,40 +940,45 @@ void getAlignResults::generateTargetI(size_t target_id, std::map<size_t, cv::Mat
         targetsImgs[target_id] = target;
     }
 }
+bool sortPixelWeight(const struct pixel_weight& a, const struct pixel_weight& b)
+{
+    return a.weight > b.weight;
+}
 
-void getAlignResults::getSimilarityTerm(cv::Mat3b S, cv::Mat1i ann_s2t, cv::Mat1i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv)
+void getAlignResults::getSimilarityTerm(cv::Mat3b S, cv::Mat3i ann_s2t, cv::Mat3i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv)
 {
     int total = settings.imgH * settings.imgW;
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
-
-        if( i % settings.patchStep != 0 || j % settings.patchStep != 0 ) // set the patch's step
-            continue;
-
-        int x, y, v;
-        // Su: completeness
-        // here, (i,j) is on Si, and (x,y) on Ti
+        su.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
+        sv.at<cv::Vec4i>(j, i) = cv::Vec4i(0,0,0,0);
+    }
+#pragma omp parallel for
+    for ( int index = 0; index < total; index++) {
+        int j = index / settings.imgW;
+        int i = index % settings.imgW;
+        // if in boundary, no need to check pm's results
         if( i >= settings.imgW - (settings.patchWidth-1) || j >= settings.imgH - (settings.patchWidth-1)) {
             calcSuv(S, i, j, su, i, j, 1);
-        } else {
-            v = ann_s2t.at<int>(j, i);
-            x = INT_TO_X(v); y = INT_TO_Y(v);
-            calcSuv(S, i, j, su, x, y, settings.patchWidth);
+            calcSuv(S, i, j, sv, i, j, 1);
+            continue;
         }
+        // set the patch's step
+        if( i % settings.patchStep != 0 || j % settings.patchStep != 0 )
+            continue;
+        int x, y;
+        // Su: completeness
+        // here, (i,j) is on Si, and (x,y) on Ti
+        x = ann_s2t.at<cv::Vec3i>(j, i)(0); y = ann_s2t.at<cv::Vec3i>(j, i)(1);
+        calcSuv(S, i, j, su, x, y, settings.patchWidth);
         // Sv: coherence
         // here, (i,j) is on Ti, and (x,y) on Si
-        if( i >= settings.imgW - (settings.patchWidth-1) || j >= settings.imgH - (settings.patchWidth-1)) {
-            calcSuv(S, i, j, sv, i, j, 1);
-        } else {
-            v = ann_t2s.at<int>(j, i);
-            x = INT_TO_X(v); y = INT_TO_Y(v);
-            calcSuv(S, x, y, sv, i, j, settings.patchWidth);
-        }
+        x = ann_t2s.at<cv::Vec3i>(j, i)(0); y = ann_t2s.at<cv::Vec3i>(j, i)(1);
+        calcSuv(S, x, y, sv, i, j, settings.patchWidth);
     }
 }
-
 void getAlignResults::calcSuv(cv::Mat3b S, int i, int j, cv::Mat4i &s, int x, int y, int w)
 {
     for ( int dy = 0; dy < w; dy++ ) {
@@ -783,26 +994,8 @@ void getAlignResults::calcSuv(cv::Mat3b S, int i, int j, cv::Mat4i &s, int x, in
 }
 
 /*----------------------------------------------
- *  Generate Mis
+ *  Generate Mi
  * ---------------------------------------------*/
-void getAlignResults::generateTextures()
-{
-    E2 = 0;
-    if(LOG_SAVE_M)
-        LOG( " Textures << ", false );
-    if(OUTPUT_T_M_INSTANT) {
-        targetsImgs.clear();
-        for( size_t i : kfIndexs )
-           targetsImgs[i] = cv::imread(targetsFiles[i]);
-    }
-    for( size_t i : kfIndexs ) {
-        generateTextureI(i, targetsImgs);
-        if(LOG_SAVE_M)
-            LOG( std::to_string(i) + " ", false);
-    }
-    if(LOG_SAVE_M)
-        LOG("<< Done << E2: " + std::to_string(E2));
-}
 void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::Mat3b> targets)
 {
     int total = settings.imgH * settings.imgW;
@@ -811,7 +1004,6 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
-        cv::Point2i p_img = cv::Point2i(i, j);
 
         cv::Vec3f sum(0,0,0);
         float weight = 0, sum_w = 0;
@@ -824,14 +1016,13 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
         for ( size_t t : kfIndexs ) {
             flag_valid = true;
             if ( t == texture_id ) {
-                weight = weights[t].at<float>(p_img.y, p_img.x);
+                weight = weights[t].at<float>(j, i);
                 pixel = targets[t].at<cv::Vec3b>(j, i);
             } else {
-                cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
+                cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(j, i);
                 if ( Xij(2) > 0 ){
-                    cv::Point2i p_img_t = cv::Point2i(Xij(0), Xij(1));
-                    weight = weights[t].at<float>(p_img_t.y, p_img_t.x);
-                    pixel = targets[t].at<cv::Vec3b>(p_img_t.y, p_img_t.x);
+                    weight = weights[t].at<float>(Xij(1), Xij(0));
+                    pixel = targets[t].at<cv::Vec3b>(Xij(1), Xij(0));
                 } else
                     flag_valid = false;
             }
@@ -857,9 +1048,11 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
                     int p2 = texture.at<cv::Vec3b>(j,i)(_pi);
                     E2_2 += std::pow(p1-p2, 2);
                 }
-                E2_1 += (E2_2 * E2_weights[_i]);
+                E2_1 += (E2_2 / 65025 * E2_weights[_i]);
             }
-            E2 += (E2_1 / E2_pixels.size());
+            double E2_TEST = (E2_1 / E2_pixels.size());
+            if ( !std::isnan(E2_TEST) )
+                E2 += E2_TEST;
         }
     }
     if(OUTPUT_T_M_INSTANT) {
@@ -880,23 +1073,20 @@ void getAlignResults::generateTextureIWithS(size_t texture_id, std::string fulln
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
-        cv::Point2i p_img = cv::Point2i(i, j);
 
         cv::Vec3f sum(0,0,0);
         float weight = 0, sum_w = 0;
         cv::Vec3b pixel; bool flag_valid;
-
         for ( size_t t : kfIndexs ) {
             flag_valid = true;
             if ( t == texture_id ) {
-                weight = weights[t].at<float>(p_img.y, p_img.x);
+                weight = weights[t].at<float>(j, i);
                 pixel = sourcesImgs[t].at<cv::Vec3b>(j, i);
             } else {
-                cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(p_img.y, p_img.x);
+                cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(j, i);
                 if ( Xij(2) > 0 ){
-                    cv::Point2i p_img_t = cv::Point2i(Xij(0), Xij(1));
-                    weight = weights[t].at<float>(p_img_t.y, p_img_t.x);
-                    pixel = sourcesImgs[t].at<cv::Vec3b>(p_img_t.y, p_img_t.x);
+                    weight = weights[t].at<float>(Xij(1), Xij(0));
+                    pixel = sourcesImgs[t].at<cv::Vec3b>(Xij(1), Xij(0));
                 } else
                     flag_valid = false;
             }
@@ -950,7 +1140,8 @@ void getAlignResults::generateTexturedOBJ(std::string path, std::string filename
                 cv::Mat X_w = (cv::Mat_<float>(4, 1) << cloud_rgb.points[v_index].x, cloud_rgb.points[v_index].y, cloud_rgb.points[v_index].z, 1);
                 cv::Mat X_img = worldToImg(X_w, img_i);
                 cv::Point2i p_img( std::round(X_img.at<float>(0)), std::round(X_img.at<float>(1)) );
-                if( !pointProjectionValid(X_img.at<float>(2), img_i, p_img.x, p_img.y) )
+                if( !pointProjectionValid(X_img.at<float>(2), img_i, p_img.x, p_img.y) ||
+                        weights[img_i].at<float>(p_img.y, p_img.x) < 0.1f )
                     flag = false;
                 else {
                     v_uv[p_i] = p_img;

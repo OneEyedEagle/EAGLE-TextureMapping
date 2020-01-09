@@ -11,16 +11,18 @@ class Settings
 public:
     int originImgW, originImgH, originDepthW, originDepthH, imgW, imgH, scaleInitW, scaleInitH;
     int patchWidth, patchStep, patchSize, frameStart, frameEnd;
-    double scaleFactor, alpha_u, alpha_v, lamda;
+    double scaleFactor, alpha_u, alpha_v, lamda, patchRandomSearchTimes;
     size_t scaleTimes;
     std::vector<size_t> kfIndexs, scaleIters;
 
+    std::string resultsPathSurfix;
     std::string allFramesPath, cameraTxtFile, camTrajNamePattern;
     std::string keyFramesPath, kfCameraTxtFile, patchmatchBinFile, originResolution, plyFile;
-    std::string rgbNamePattern, dNamePattern, kfRGBNamePattern, kfDNamePattern, rgbNameExt, kfRGBMatch, kfDMatch;
+    std::string rgbNamePattern, dNamePattern, kfRGBNamePattern, kfDNamePattern, rgbNameExt, kfRGBMatch;
     bool camTrajFromWorldToCam;
     float cameraDFx, cameraDFy, cameraDCx, cameraDCy, cameraFx, cameraFy, cameraCx, cameraCy;
     cv::Mat1f cameraK, cameraDK;
+    char depthType;
 
     Settings()
     {
@@ -46,6 +48,9 @@ public:
 
         // set the file extension of RGB image (to store the rgb file in Results folder)
         rgbNameExt = "jpg";
+        // set the depth data type
+        //  f - float  i - int  s - ushort  b - uchar
+        depthType = 'f';
 
         // if you already have a ply file, than no need to set these variables to use PCL for getting a ply
         //   (more details can be found in main.cpp)
@@ -69,18 +74,14 @@ public:
         }
 
         // keyframes' path (where the rgbd images are)
-        keyFramesPath = "/home/wsy/TextureRecover/Results/bloster2_2";
+        keyFramesPath = "/media/eagle/4670D70170D6F6A1/Datas/LAB/bloster/raw";
         // keyframes' name pattern
         kfRGBNamePattern = "color_%02d." + rgbNameExt;
         kfRGBMatch = "color_*." + rgbNameExt;
-        // actrually, it's no need to read keyframes' depth images as my code uses the remapping algorithm
-        //  so this is for an extension.
-        {
-            kfDNamePattern = "%03d_d.png";
-            kfDMatch = "*_d*";
-        }
+        // [optional] keyframes' depth name pattern, using depth images to do a check when remapping
+        kfDNamePattern = "depth_%02d.png";
         // valid keyframes ( all are valid if empty)
-        kfIndexs = {0,1,2,3,4,5,6,9,11,12,13};
+        kfIndexs = {0,1,3,4,5,11,12,13};
 
         // necessary files under the keyFramesPath folder
         {
@@ -99,40 +100,43 @@ public:
         //  if the cameraTxtFile and the plyFile are from PCL KF, then this should be false.
         camTrajFromWorldToCam = true;
 
+        // surfix of the resultsPath to distinguish with different results under different params
+        resultsPathSurfix = "";
+
         // scale
-        scaleTimes = 5;
-        scaleIters = {50, 50, 50, 50, 50, 20, 20, 20, 10, 10};
+        scaleTimes = 10;
+        scaleIters = {50, 45, 40, 35, 30, 25, 20, 15, 10, 5};
         scaleInitH = originImgH / 4;
 
         // the width and height of a patch
         patchWidth = 7;
         // the step of patchs when voting
-        patchStep = 3;
+        patchStep = 1;
+        // the times of range when random searching in patchmatch
+        //  searching window's width = patchRandomSearchTimes * sqrt(imgW * imgH)
+        patchRandomSearchTimes = 0.01;
 
         // weight the similarity from Si to Ti
         alpha_u = 1.0;
         // weight the similarity from Ti to Si
         alpha_v = 2.0;
         // weight the consistency that how much M affects Ti
-        lamda = 0.1;
+        lamda = 5.0;
 
         // -----------------
         //  custom
         // -----------------
-        init_zhou();
+        init_zhou_small();
 
         // -----------------
         //  init
         // -----------------
-        // path of PatchMatch's bin
-        patchmatchBinFile = "../patchmatch/eagle_pm_minimal_" + std::to_string(patchWidth);
-
         // scale
         scaleInitW = static_cast<int>( std::round(originImgW * scaleInitH * 1.0 / originImgH) );
-        scaleFactor = pow( originImgH * 1.0 / scaleInitH, 1.0 / (scaleTimes-1) );
-
-        // make the dir
-        EAGLE::checkPath(keyFramesPath);
+        if ( scaleTimes > 1 )
+            scaleFactor = pow( originImgH * 1.0 / scaleInitH, 1.0 / (scaleTimes-1) );
+        else
+            scaleFactor = 1.0;
 
         // camera's intrinsic matrix
         //   fx  0 cx
@@ -148,27 +152,39 @@ public:
         imgH = originImgH;
     }
 
-    void init_zhou(){
-        originImgW = 1280;
-        originImgH = 1024;
+    void init_zhou_small(){
+        originImgW = 640;
+        originImgH = 480;
+        cameraFx = 525.0f;
+        cameraFy = 525.0f;
+        cameraCx = 319.5f;
+        cameraCy = 239.5f;
+        // origin depth img's resolution
+        originDepthW = originImgW;
+        originDepthH = originImgH;
+        // depth camera's data
+        cameraDFx = cameraFx;
+        cameraDFy = cameraFy;
+        cameraDCx = cameraCx;
+        cameraDCy = cameraCy;
 
-        cameraFx = 1050.0f;
-        cameraFy = 1050.0f;
-        cameraCx = 639.5f;
-        cameraCy = 511.5f;
-
-        keyFramesPath = "../datas";
+        keyFramesPath = "/home/eagle/GitHub/EAGLE-TextureMapping/datas";
         rgbNameExt = "jpg";
         kfRGBNamePattern = "%05d." + rgbNameExt;
         kfRGBMatch = "*." + rgbNameExt;
-        kfIndexs = {0,1,4,6,12,15,17,21};
-        plyFile = "world.ply";
+        kfDNamePattern = "%05d.png";
+        depthType = 's';
         camTrajFromWorldToCam = false;
+        plyFile = "world.ply";
+        kfIndexs = {0,1,2,3,4,5,6,7,12,13,14,15,17,18,19,20,21};
 
+        resultsPathSurfix = "";
+
+        scaleTimes = 10;
         scaleInitH = originImgH / 4;
-    }
 
+        lamda = 10.0;
+    }
 };
 
 #endif // SETTINGS_H
-
