@@ -1,9 +1,9 @@
-﻿#include "getalignresults.h"
+#include "getalignresults.h"
 
 /*----------------------------------------------
  *  Log Settings
  * ---------------------------------------------*/
-#define OUTPUT_T_M_INSTANT true
+#define OUTPUT_T_M_INSTANT false
 
 /*----------------------------------------------
  *  Math
@@ -49,8 +49,12 @@ getAlignResults::getAlignResults(Settings &_settings)
     LOG("[ From Path: " + settings.keyFramesPath + " ]");
     LOG("[ To Path: ./results_Bi17" + settings.resultsPathSurfix + " ]" );
     LOG("[ Alpha U: " + std::to_string(settings.alpha_u) + " | Alpha V: " + std::to_string(settings.alpha_v) + " ] ");
-    LOG("[ Patch Width: " + std::to_string(settings.patchWidth) + " | Patch Step: " + std::to_string(settings.patchStep) + " | Patch Random Search: " + std::to_string(settings.patchRandomSearchTimes) + " ]");
-    LOG("[ Scale: " + std::to_string(settings.scaleTimes) + " | From " + std::to_string(settings.scaleInitW) + "x" + std::to_string(settings.scaleInitH) + " to " + std::to_string(settings.originImgW) + "x" + std::to_string(settings.originImgH) + " ]");
+    LOG("[ Patch Width: " + std::to_string(settings.patchWidth) +
+        " | Patch Step: " + std::to_string(settings.patchStep) +
+        " | Patch Random Search: " + std::to_string(settings.patchRandomSearchTimes) + " ]");
+    LOG("[ Scale: " + std::to_string(settings.scaleTimes) +
+        " | From " + std::to_string(settings.scaleInitW) + "x" + std::to_string(settings.scaleInitH) +
+        " to " + std::to_string(settings.originImgW) + "x" + std::to_string(settings.originImgH) + " ]");
 
     //pcl::PolygonMesh mesh;
     pcl::io::loadPLYFile(settings.keyFramesPath + "/" + settings.plyFile, mesh);
@@ -73,10 +77,25 @@ getAlignResults::getAlignResults(Settings &_settings)
         readCameraTraj();
 
     LOG("[ Init Success. " + std::to_string(kfIndexs.size()) + " / " + std::to_string(kfTotal) + " Images " + "]");
-    clock_t start_time = std::clock();
+
+    time_t start, end;
+    struct timeval tv;
+    char time_start_str[32], time_end_str[32];
+
+    gettimeofday(&tv, nullptr);
+    auto time_tmp = localtime(&tv.tv_sec);
+    strftime(time_start_str, 32, "%Y.%m.%d %H:%M:%S", time_tmp);
+    time(&start);
+
     doIterations();
-    clock_t end_time = std::clock();
-    double all_seconds = static_cast<double>( (end_time - start_time) / CLOCKS_PER_SEC );
+
+    gettimeofday(&tv, nullptr);
+    time_tmp = localtime(&tv.tv_sec);
+    strftime(time_end_str, 32, "%Y.%m.%d %H:%M:%S", time_tmp);
+    time(&end);
+
+    double all_seconds = difftime(end, start);
+    LOG("[ Running from " + std::string(time_start_str) + " to " + std::string(time_end_str) + " ]");
     LOG("[ Finish in " + std::to_string(all_seconds) + " s ]");
 }
 getAlignResults::~getAlignResults()
@@ -138,16 +157,14 @@ void getAlignResults::readDepthImgs()
         sprintf(tmp, (settings.kfDNamePattern).c_str(), i);
         std::string file = settings.keyFramesPath + "/" + std::string(tmp);
         if (EAGLE::isFileExist(file))
-            depthImgs[i] = cv::imread(file, CV_LOAD_IMAGE_UNCHANGED);
+            depthImgs[i] = cv::imread(file, cv::IMREAD_UNCHANGED);
     }
 }
-float getAlignResults::getDepth(size_t img_i, int x, int y)
+float getAlignResults::getDepthRaw(size_t img_i, int x, int y)
 {
     if ( depthImgs.empty() == true ) {
         return -1.0f;
     }
-    x = static_cast<int>(round(1.0 * x / settings.imgW * settings.originDepthW));
-    y = static_cast<int>(round(1.0 * y / settings.imgH * settings.originDepthH));
     float v = 0;
     switch(settings.depthType) {
     case 'f' :
@@ -171,6 +188,15 @@ float getAlignResults::getDepth(size_t img_i, int x, int y)
     }
     //std::cout << "[(" << x << "," << y << ") " << v << "]" << std::flush;
     return v;
+}
+float getAlignResults::getDepth(size_t img_i, int x, int y)
+{
+    if ( depthImgs.empty() == true ) {
+        return -1.0f;
+    }
+    x = static_cast<int>(round(1.0 * x / settings.imgW * settings.originDepthW));
+    y = static_cast<int>(round(1.0 * y / settings.imgH * settings.originDepthH));
+    return getDepthRaw(img_i, x, y);
 }
 
 /*----------------------------------------------
@@ -309,18 +335,21 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
     // check if the point is valid
     if ( !pointValid(x, y) )
         return false;
-    // ground truth depth
-    float depth = getDepth(img_id, x, y);
-    if ( depth > 0 && fabs(static_cast<double>(depth - point_z)) > 0.01 )
-        return false;
+    // depth image's depth
+//    float depth = getDepth(img_id, x, y);
+//    if ( depth > 0 && ( (depth - point_z) > 0.01f || (point_z - depth) > 0.01f) )
+//        return false;
     // get the position's valid info
     size_t p_index = static_cast<size_t>(x + y * settings.imgW);
     struct valid_info * info = &img_valid_info[img_id][p_index];
     // check the depth (whether the point is occluded)
     if ( point_z > info->depth + 0.01f )
         return false;
+    // check the angle, if the angle is too small, then it's a bad projection
+    if ( info->cos_alpha > -0.5f )
+        return false;
     // check the weight (if the weight is too small, then it's a bad projection)
-    if ( weights[img_id].at<float>(y, x) < 0.1f )
+    if ( weights[img_id].at<float>(y, x) < 0.01f )
         return false;
     // the point can be projected to the position on img
     return true;
@@ -479,6 +508,7 @@ void getAlignResults::calcImgValidMesh(size_t img_i, BVHTree &bvhtree)
             float cos_alpha = -vert2view.dot(normal); // the cos of angle between camera dir and vertex normal
             info->cos_alpha = cos_alpha;
 
+            // calc weight
             float weight = cos_alpha * cos_alpha / d2;
             weights[img_i].at<float>(y, x) = weight;
             if ( weight > weight_max )
@@ -494,7 +524,7 @@ void getAlignResults::calcImgValidMesh(size_t img_i, BVHTree &bvhtree)
     for ( size_t pixel_index = 0; pixel_index < total; pixel_index++) {
         int y = static_cast<int>(pixel_index) / settings.imgW;
         int x = static_cast<int>(pixel_index) % settings.imgW;
-        weights[img_i].at<float>(y, x) *= d2_min; // normalize the distance
+        weights[img_i].at<float>(y, x) *= d2_max;//d2_min; // normalize the distance
     }
 
     cv::Mat weight_out;
@@ -530,16 +560,9 @@ void getAlignResults::calcImgValidPatch(size_t img_i)
 }
 int getAlignResults::isPatchValid(size_t img_i, int x, int y)
 {
-    for ( int i = 0; i < settings.patchWidth; i++ ) {
-        if ( weights[img_i].at<float>(y, x + i) > 0 ||
-             weights[img_i].at<float>(y + settings.patchWidth-1, x + i) > 0 )
-            return 1; // valid patch;
-    }
-    for ( int j = 1; j < settings.patchWidth - 1; j++ ) {
-        if ( weights[img_i].at<float>(y + j, x) > 0 ||
-             weights[img_i].at<float>(y + j, x + settings.patchWidth-1) > 0 )
-            return 1; // valid patch;
-    }
+    // if the center is valid, then believe it's valid
+    if ( weights[img_i].at<float>(y + settings.patchWidth/2, x + settings.patchWidth/2) > 0)
+        return 1; // valid patch;
     return 0;
 }
 
@@ -587,8 +610,8 @@ void getAlignResults::calcImgRemapping(size_t img_i, size_t img_j)
         cv::Mat p_w = imgToWorld(x, y, info->depth, img_i);
         cv::Mat p_j = worldToImg(p_w, img_j);
         cv::Point2i p_img_j;
-        p_img_j.x = static_cast<int>( round(p_j.at<float>(0)) );
-        p_img_j.y = static_cast<int>( round(p_j.at<float>(1)) );
+        p_img_j.x = static_cast<int>( round( static_cast<double>(p_j.at<float>(0)) ) );
+        p_img_j.y = static_cast<int>( round( static_cast<double>(p_j.at<float>(1)) ) );
         if ( !pointProjectionValid(p_j.at<float>(2), img_j, p_img_j.x, p_img_j.y) )
             continue;
 
@@ -629,7 +652,7 @@ void getAlignResults::showRemapping()
 void getAlignResults::doIterations()
 {
     size_t scale = 0;
-//    scale = settings.scaleTimes-1;
+    //scale = settings.scaleTimes-1;
     bool init_T_M = true;
     char tmp_[16]; sprintf(tmp_, "%dx%d", settings.originImgW, settings.originImgH);
     std::string originResolution(tmp_);
@@ -671,6 +694,11 @@ void getAlignResults::doIterations()
                 system( ("convert " + texturesFiles[i] + " -resize " + newResolution + "! " + texturesFiles[i]).c_str() );
             }
         }
+        targetsImgs.clear(); texturesImgs.clear();
+        for( size_t i : kfIndexs ) {
+            targetsImgs[i] = cv::imread(targetsFiles[i]);
+            texturesImgs[i] = cv::imread(texturesFiles[i]);
+        }
 
         // using ray intersection method to get all pixels' depth and weight
         calcValidMesh();
@@ -680,38 +708,23 @@ void getAlignResults::doIterations()
         calcRemapping();
 
         // do iterations
-        if( ! OUTPUT_T_M_INSTANT) {
-            targetsImgs.clear(); texturesImgs.clear();
-            for( size_t i : kfIndexs ) {
-                targetsImgs[i] = cv::imread(targetsFiles[i]);
-                texturesImgs[i] = cv::imread(texturesFiles[i]);
-            }
-        }
         for ( size_t _count = 0; _count < settings.scaleIters[scale]; _count++) {
             LOG("[ Iteration " + std::to_string(_count+1) + " at " + newResolution + " ]");
             E1 = 0; E2 = 0;
             LOG( " T << ", false );
-            if( OUTPUT_T_M_INSTANT ){
-                texturesImgs.clear();
-                for( size_t i : kfIndexs ) { texturesImgs[i] = cv::imread(texturesFiles[i]); }
-            }
             for( size_t i : kfIndexs ) {
                 generateTargetI(i, texturesImgs);
                 LOG(std::to_string(i) + " ", false);
             }
             LOG( "<< E1: " + std::to_string(E1), true );
             LOG( " M << ", false );
-            if( OUTPUT_T_M_INSTANT ) {
-                targetsImgs.clear();
-                for( size_t i : kfIndexs ) { targetsImgs[i] = cv::imread(targetsFiles[i]); }
-            }
             for( size_t i : kfIndexs ) {
                 generateTextureI(i, targetsImgs);
                 LOG(std::to_string(i) + " ", false);
             }
             LOG( "<< E2: " + std::to_string(E2), true );
         }
-        if( ! OUTPUT_T_M_INSTANT)
+        if( !OUTPUT_T_M_INSTANT )
             for( size_t i : kfIndexs ){
                 cv::imwrite( targetsFiles[i], targetsImgs[i] );
                 cv::imwrite( texturesFiles[i], texturesImgs[i] );
@@ -857,11 +870,11 @@ int getAlignResults::dist(cv::Mat3b a, cv::Mat3b b, int ax, int ay, int bx, int 
 void getAlignResults::generateTargetI(size_t target_id, std::map<size_t, cv::Mat3b> textures)
 {
     int total = settings.imgH * settings.imgW;
-    cv::Mat3b target( cv::Size(settings.imgW, settings.imgH) );
+    cv::Mat3b target( cv::Size(settings.imgW, settings.imgH), cv::Vec3b(255,255,255) );
 
     // patchmatch
     cv::Mat3b sourceImg = sourcesImgs[target_id];
-    cv::Mat3b targetImg = cv::imread(targetsFiles[target_id]);
+    cv::Mat3b targetImg = targetsImgs[target_id];
     cv::Mat3i result_ann_s2t( settings.imgH, settings.imgW ); // cv::Vec3i(x, y, d)
     patchmatch(target_id, sourceImg, targetImg, result_ann_s2t);
     cv::Mat3i result_ann_t2s( settings.imgH, settings.imgW );
@@ -881,7 +894,7 @@ void getAlignResults::generateTargetI(size_t target_id, std::map<size_t, cv::Mat
         E1_1 += result_ann_s2t.at<cv::Vec3i>(j, i)(2) * 1.0 / settings.patchSize;
         E1_2 += result_ann_t2s.at<cv::Vec3i>(j, i)(2) * 1.0 / settings.patchSize;
     }
-    E1 += (settings.alpha_u * E1_1 + settings.alpha_v * E1_2) / 65025;
+    E1 += (settings.alpha_u * E1_1 + settings.alpha_v * E1_2) / 65025.0;
 
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
@@ -909,19 +922,12 @@ void getAlignResults::generateTargetI(size_t target_id, std::map<size_t, cv::Mat
         // consistency term
         double weight = static_cast<double>(weights[target_id].at<float>(j, i));
         double _factor2 = lamda * weight;
-        cv::Vec3f sum_M(0,0,0); float sum_w = 0.0f;
+        cv::Vec3d sum_M(0,0,0); int sum_w = 0;
         for( size_t t : kfIndexs ) {
-            if ( t == target_id ) {
-                float w = weights[t].at<float>(j, i);
-                sum_M += textures[t].at<cv::Vec3b>(j, i) * w;
-                sum_w += w;
-            } else {
-                cv::Vec3i Xij = mappings[target_id][t].at<cv::Vec3i>(j, i);
-                if ( Xij(2) > 0 ){
-                    float w = weights[t].at<float>(Xij(1), Xij(0));
-                    sum_M += textures[t].at<cv::Vec3b>(Xij(1), Xij(0)) * w;
-                    sum_w += w;
-                }
+            cv::Vec3i Xij = mappings[target_id][t].at<cv::Vec3i>(j, i);
+            if ( Xij(2) > 0 ){
+                sum_M += textures[t].at<cv::Vec3b>(Xij(1), Xij(0)) * 1.0;
+                sum_w += 1;
             }
         }
         sum_bgr += _factor2 * sum_M / sum_w;
@@ -934,15 +940,10 @@ void getAlignResults::generateTargetI(size_t target_id, std::map<size_t, cv::Mat
         }
         target.at<cv::Vec3b>(j, i) = bgr;
     }
-    if(OUTPUT_T_M_INSTANT) {
+    targetsImgs[target_id] = target;
+    if ( OUTPUT_T_M_INSTANT ) {
         cv::imwrite( targetsFiles[target_id], target );
-    } else {
-        targetsImgs[target_id] = target;
     }
-}
-bool sortPixelWeight(const struct pixel_weight& a, const struct pixel_weight& b)
-{
-    return a.weight > b.weight;
 }
 
 void getAlignResults::getSimilarityTerm(cv::Mat3b S, cv::Mat3i ann_s2t, cv::Mat3i ann_t2s, cv::Mat4i &su, cv::Mat4i &sv)
@@ -999,7 +1000,7 @@ void getAlignResults::calcSuv(cv::Mat3b S, int i, int j, cv::Mat4i &s, int x, in
 void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::Mat3b> targets)
 {
     int total = settings.imgH * settings.imgW;
-    cv::Mat3b texture( cv::Size(settings.imgW, settings.imgH) );
+    cv::Mat3b texture( cv::Size(settings.imgW, settings.imgH), cv::Vec3b(255,255,255) );
 #pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
@@ -1007,26 +1008,18 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
 
         cv::Vec3f sum(0,0,0);
         float weight = 0, sum_w = 0;
-        cv::Vec3b pixel; bool flag_valid;
+        cv::Vec3b pixel;
 
         // for E2 calculation
         std::vector<cv::Vec3b> E2_pixels;
         std::vector<float> E2_weights;
 
         for ( size_t t : kfIndexs ) {
-            flag_valid = true;
-            if ( t == texture_id ) {
-                weight = weights[t].at<float>(j, i);
-                pixel = targets[t].at<cv::Vec3b>(j, i);
-            } else {
-                cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(j, i);
-                if ( Xij(2) > 0 ){
-                    weight = weights[t].at<float>(Xij(1), Xij(0));
-                    pixel = targets[t].at<cv::Vec3b>(Xij(1), Xij(0));
-                } else
-                    flag_valid = false;
-            }
-            if(flag_valid == true) {
+            cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(j, i);
+            if ( Xij(2) > 0 ){
+                weight = weights[t].at<float>(Xij(1), Xij(0));
+                pixel = targets[t].at<cv::Vec3b>(Xij(1), Xij(0));
+
                 sum_w += weight;
                 for( int p_i = 0; p_i < 3; p_i++ )
                     sum(p_i) = sum(p_i) + weight * pixel(p_i);
@@ -1048,17 +1041,16 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
                     int p2 = texture.at<cv::Vec3b>(j,i)(_pi);
                     E2_2 += std::pow(p1-p2, 2);
                 }
-                E2_1 += (E2_2 / 65025 * E2_weights[_i]);
+                E2_1 += (E2_2 / 65025.0 * E2_weights[_i]);
             }
             double E2_TEST = (E2_1 / E2_pixels.size());
             if ( !std::isnan(E2_TEST) )
                 E2 += E2_TEST;
         }
     }
-    if(OUTPUT_T_M_INSTANT) {
+    texturesImgs[texture_id] = texture;
+    if ( OUTPUT_T_M_INSTANT ) {
         cv::imwrite( texturesFiles[texture_id], texture );
-    } else {
-        texturesImgs[texture_id] = texture;
     }
 }
 
@@ -1076,21 +1068,13 @@ void getAlignResults::generateTextureIWithS(size_t texture_id, std::string fulln
 
         cv::Vec3f sum(0,0,0);
         float weight = 0, sum_w = 0;
-        cv::Vec3b pixel; bool flag_valid;
+        cv::Vec3b pixel;
         for ( size_t t : kfIndexs ) {
-            flag_valid = true;
-            if ( t == texture_id ) {
-                weight = weights[t].at<float>(j, i);
-                pixel = sourcesImgs[t].at<cv::Vec3b>(j, i);
-            } else {
-                cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(j, i);
-                if ( Xij(2) > 0 ){
-                    weight = weights[t].at<float>(Xij(1), Xij(0));
-                    pixel = sourcesImgs[t].at<cv::Vec3b>(Xij(1), Xij(0));
-                } else
-                    flag_valid = false;
-            }
-            if(flag_valid == true) {
+            cv::Vec3i Xij = mappings[texture_id][t].at<cv::Vec3i>(j, i);
+            if ( Xij(2) > 0 ) {
+                weight = weights[t].at<float>(Xij(1), Xij(0));
+                pixel = sourcesImgs[t].at<cv::Vec3b>(Xij(1), Xij(0));
+
                 sum_w += weight;
                 for( int p_i = 0; p_i < 3; p_i++ )
                     sum(p_i) = sum(p_i) + weight * pixel(p_i);
@@ -1133,21 +1117,7 @@ void getAlignResults::generateTexturedOBJ(std::string path, std::string filename
     for( size_t i = 0; i < mesh_num; i++ ) {
         size_t img_index = kfTotal;
         for( size_t img_i : kfIndexs ) {
-            v_uv.clear();
-            bool flag = true;
-            for(size_t p_i = 0; p_i < 3; p_i++){
-                size_t v_index = mesh.polygons[i].vertices[p_i];
-                cv::Mat X_w = (cv::Mat_<float>(4, 1) << cloud_rgb.points[v_index].x, cloud_rgb.points[v_index].y, cloud_rgb.points[v_index].z, 1);
-                cv::Mat X_img = worldToImg(X_w, img_i);
-                cv::Point2i p_img( std::round(X_img.at<float>(0)), std::round(X_img.at<float>(1)) );
-                if( !pointProjectionValid(X_img.at<float>(2), img_i, p_img.x, p_img.y) ||
-                        weights[img_i].at<float>(p_img.y, p_img.x) < 0.1f )
-                    flag = false;
-                else {
-                    v_uv[p_i] = p_img;
-                }
-            }
-            if ( flag == true ) {
+            if (checkMeshMapImg(i, img_i, v_uv) == true) {
                 img_index = img_i;
                 break;
             }
@@ -1163,8 +1133,8 @@ void getAlignResults::generateTexturedOBJ(std::string path, std::string filename
                 if ( vertex_uv_index[img_index][v_index] > 0 ) {
                     uv_coord_index = vertex_uv_index[img_index][v_index];
                 } else { // put into a new uv-coord into the uv_coords
-                    float uv_x = (v_uv[p_i].x + 1) * 1.0f / settings.imgW;
-                    float uv_y = (v_uv[p_i].y + 1) * 1.0f / settings.imgH;
+                    float uv_x = (v_uv[p_i].x + 0.5f) / settings.imgW;
+                    float uv_y = (v_uv[p_i].y + 0.5f) / settings.imgH;
                     uv_coords.push_back( cv::Point2f(uv_x, uv_y) );
                     // set its index to the vertex_uv_index
                     vertex_uv_index[img_index][v_index] = next_empty_uv_index;
@@ -1182,6 +1152,27 @@ void getAlignResults::generateTexturedOBJ(std::string path, std::string filename
     }
     saveOBJwithMTL(path, filename, resultImgNamePattern, cloud_rgb, uv_coords, mesh_info);
 }
+
+bool getAlignResults::checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<cv::Point2i> &v_uv)
+{
+    v_uv.clear();
+    bool flag = true;
+    for(size_t p_i = 0; p_i < 3; p_i++) {
+        size_t v_index = mesh.polygons[mesh_i].vertices[p_i];
+        cv::Mat X_w = (cv::Mat_<float>(4, 1) << cloud_rgb.points[v_index].x, cloud_rgb.points[v_index].y, cloud_rgb.points[v_index].z, 1);
+        cv::Mat X_img = worldToImg(X_w, img_i);
+        int _x = static_cast<int>( round(static_cast<double>(X_img.at<float>(0))) );
+        int _y = static_cast<int>( round(static_cast<double>(X_img.at<float>(1))) );
+        if( !pointProjectionValid(X_img.at<float>(2), img_i, _x, _y) ) {
+            flag = false;
+            break;
+        } else {
+            v_uv[p_i] = cv::Point2i(_x, _y);
+        }
+    }
+    return flag;
+}
+
 void getAlignResults::saveOBJwithMTL(std::string path, std::string filename, std::string resultImgNamePattern,
                                      pcl::PointCloud<pcl::PointXYZRGB> cloud,
                                      std::vector<cv::Point2f> uv_coords,

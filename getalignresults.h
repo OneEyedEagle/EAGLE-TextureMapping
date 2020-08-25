@@ -6,7 +6,8 @@
 #include <vector>
 #include <omp.h>
 #include <cfloat>
-#include <ctime>
+#include <time.h>
+#include <sys/time.h>
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -67,6 +68,7 @@ public:
     std::string getImgFilename(size_t img_i, std::string pre, std::string ext);
 
     void readDepthImgs();
+    float getDepthRaw(size_t img_i, int x, int y);
     float getDepth(size_t img_i, int x, int y);
 
     void readCameraTraj(std::string camTraj_file);
@@ -115,12 +117,7 @@ public:
     };
     void generateTexturedOBJ(std::string path, std::string filename, std::string resultImgNamePattern);
     void saveOBJwithMTL(std::string path, std::string filename, std::string resultImgNamePattern, pcl::PointCloud<pcl::PointXYZRGB> cloud, std::vector<cv::Point2f> uv_coords, std::map<size_t, std::vector<struct face_info>> mesh_info);
+    bool checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<cv::Point2i> &v_uv);
 };
-
-struct pixel_weight {
-    cv::Vec3b pixel;
-    float weight = 0;
-};
-bool sortPixelWeight(const struct pixel_weight& a, const struct pixel_weight& b);
 
 #endif // GETALIGNRESULTS_H

@@ -168,7 +168,7 @@ public:
         cameraDCx = cameraCx;
         cameraDCy = cameraCy;
 
-        keyFramesPath = "/home/eagle/GitHub/EAGLE-TextureMapping/datas";
+        keyFramesPath = "../../datas";
         rgbNameExt = "jpg";
         kfRGBNamePattern = "%05d." + rgbNameExt;
         kfRGBMatch = "*." + rgbNameExt;
@@ -183,7 +183,7 @@ public:
         scaleTimes = 10;
         scaleInitH = originImgH / 4;
 
-        lamda = 10.0;
+        lamda = 5;
     }
 };
 

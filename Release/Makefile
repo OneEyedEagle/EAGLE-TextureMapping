@@ -40,7 +40,7 @@ DISTNAME      = eagle_textureMapping1.0.0
 DISTDIR = /home/eagle/GitHub/EAGLE-TextureMapping/Release/lib/eagle_textureMapping1.0.0
 LINK          = g++
 LFLAGS        = -Wl,-O1 -Wl,-rpath,/home/eagle/Qt/5.12.6/gcc_64/lib
-LIBS          = $(SUBLIBS) -fopenmp /home/eagle/CPP/libEagle_Utils.so -lboost_filesystem -lboost_system -lopencv_core -lopencv_highgui -lopencv_imgcodecs -lopencv_imgproc -L/usr/local/lib -lpcl_common -lpcl_io -lpcl_io_ply /home/eagle/Qt/5.12.6/gcc_64/lib/libQt5Gui.so /home/eagle/Qt/5.12.6/gcc_64/lib/libQt5Core.so -lGL -lpthread   
+LIBS          = $(SUBLIBS) -fopenmp /home/eagle/CPP/libEagle_Utils.so -lboost_filesystem -lboost_system -lopencv_world -L/usr/local/lib -lpcl_common -lpcl_io -lpcl_io_ply /home/eagle/Qt/5.12.6/gcc_64/lib/libQt5Gui.so /home/eagle/Qt/5.12.6/gcc_64/lib/libQt5Core.so -lGL -lpthread   
 AR            = ar cqs
 RANLIB        = 
 SED           = sed
@@ -209,6 +209,7 @@ DIST          = ../../../../Qt/5.12.6/gcc_64/mkspecs/features/spec_pre.prf \
 		../../../../Qt/5.12.6/gcc_64/mkspecs/features/qt_config.prf \
 		../../../../Qt/5.12.6/gcc_64/mkspecs/linux-g++/qmake.conf \
 		../../../../Qt/5.12.6/gcc_64/mkspecs/features/spec_post.prf \
+		../.qmake.stash \
 		../../../../Qt/5.12.6/gcc_64/mkspecs/features/exclusive_builds.prf \
 		../../../../Qt/5.12.6/gcc_64/mkspecs/features/toolchain.prf \
 		../../../../Qt/5.12.6/gcc_64/mkspecs/features/default_pre.prf \
@@ -403,6 +404,7 @@ Makefile: ../eagle_textureMapping.pro ../../../Qt/5.12.6/gcc_64/mkspecs/features
 		../../../Qt/5.12.6/gcc_64/mkspecs/features/qt_config.prf \
 		../../../Qt/5.12.6/gcc_64/mkspecs/linux-g++/qmake.conf \
 		../../../Qt/5.12.6/gcc_64/mkspecs/features/spec_post.prf \
+		.qmake.stash \
 		../../../Qt/5.12.6/gcc_64/mkspecs/features/exclusive_builds.prf \
 		../../../Qt/5.12.6/gcc_64/mkspecs/features/toolchain.prf \
 		../../../Qt/5.12.6/gcc_64/mkspecs/features/default_pre.prf \
@@ -576,6 +578,7 @@ Makefile: ../eagle_textureMapping.pro ../../../Qt/5.12.6/gcc_64/mkspecs/features
 ../../../Qt/5.12.6/gcc_64/mkspecs/features/qt_config.prf:
 ../../../Qt/5.12.6/gcc_64/mkspecs/linux-g++/qmake.conf:
 ../../../Qt/5.12.6/gcc_64/mkspecs/features/spec_post.prf:
+.qmake.stash:
 ../../../Qt/5.12.6/gcc_64/mkspecs/features/exclusive_builds.prf:
 ../../../Qt/5.12.6/gcc_64/mkspecs/features/toolchain.prf:
 ../../../Qt/5.12.6/gcc_64/mkspecs/features/default_pre.prf:
