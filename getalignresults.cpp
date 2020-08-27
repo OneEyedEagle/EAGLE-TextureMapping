@@ -345,12 +345,14 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
     // check the depth (whether the point is occluded)
     if ( point_z > info->depth + 0.01f )
         return false;
+    if ( pointOnBoundary(img_id, x, y) )
+        return false;
     // check the angle, if the angle is too small, then it's a bad projection
-    if ( info->cos_alpha > -0.5f )
-        return false;
+//    if ( info->cos_alpha > -0.1f )
+//        return false;
     // check the weight (if the weight is too small, then it's a bad projection)
-    if ( weights[img_id].at<float>(y, x) < 0.01f )
-        return false;
+//    if ( weights[img_id].at<float>(y, x) < 0.01f )
+//        return false;
     // the point can be projected to the position on img
     return true;
 }
@@ -368,9 +370,26 @@ bool getAlignResults::pointProjectionValidMesh(float point_z, size_t img_id, int
     // check the depth (whether the point is occluded)
     if ( point_z > info->depth + 0.01f )
         return false;
+    if ( pointOnBoundary(img_id, x, y) )
+        return false;
     return true;
 }
-
+// check if the img_id's (x, y) is on the boundary of the object
+bool getAlignResults::pointOnBoundary(size_t img_id, int x, int y)
+{
+    // for a small patch which (x,y) is its center,
+    //   if some weight in it is 0, then assume the point is on boundary
+    int hw = 3;
+    for ( int dy = -hw; dy <= hw; dy++ ) {
+        for ( int dx = -hw; dx <= hw; dx++ ) {
+            if( !pointValid( x+dx, y+dy ) )
+                continue;
+            if ( weights[img_id].at<float>(y + dy, x + dx) < 0.01f )
+                return true;
+        }
+    }
+    return false;
+}
 
 /*----------------------------------------------
  *  Pre-Process
