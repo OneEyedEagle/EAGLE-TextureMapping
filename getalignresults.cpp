@@ -335,11 +335,7 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
     // check if the point is valid
     if ( !pointValid(x, y) )
         return false;
-    // depth image's depth
-//    float depth = getDepth(img_id, x, y);
-//    if ( depth > 0 && ( (depth - point_z) > 0.01f || (point_z - depth) > 0.01f) )
-//        return false;
-    // get the position's valid info
+   // get the position's valid info
     size_t p_index = static_cast<size_t>(x + y * settings.imgW);
     struct valid_info * info = &img_valid_info[img_id][p_index];
     // check the depth (whether the point is occluded)
@@ -348,32 +344,12 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
     if ( pointOnBoundary(img_id, x, y) )
         return false;
     // check the angle, if the angle is too small, then it's a bad projection
-//    if ( info->cos_alpha > -0.1f )
-//        return false;
-    // check the weight (if the weight is too small, then it's a bad projection)
-//    if ( weights[img_id].at<float>(y, x) < 0.01f )
-//        return false;
+    if ( info->cos_alpha > -0.5f )
+        return false;
     // the point can be projected to the position on img
     return true;
 }
 
-// check if the point can be projected to the img_id's (x, y)
-//   this function is only for the mesh texture projection
-bool getAlignResults::pointProjectionValidMesh(float point_z, size_t img_id, int x, int y)
-{
-    // check if the point is valid
-    if ( !pointValid(x, y) )
-        return false;
-    // get the position's valid info
-    size_t p_index = static_cast<size_t>(x + y * settings.imgW);
-    struct valid_info * info = &img_valid_info[img_id][p_index];
-    // check the depth (whether the point is occluded)
-    if ( point_z > info->depth + 0.01f )
-        return false;
-    if ( pointOnBoundary(img_id, x, y) )
-        return false;
-    return true;
-}
 // check if the img_id's (x, y) is on the boundary of the object
 bool getAlignResults::pointOnBoundary(size_t img_id, int x, int y)
 {
@@ -1199,7 +1175,7 @@ bool getAlignResults::checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<c
         cv::Mat X_img = worldToImg(X_w, img_i);
         int _x = static_cast<int>( round(static_cast<double>(X_img.at<float>(0))) );
         int _y = static_cast<int>( round(static_cast<double>(X_img.at<float>(1))) );
-        if( !pointProjectionValidMesh(X_img.at<float>(2), img_i, _x, _y) ) {
+        if( !pointProjectionValid(X_img.at<float>(2), img_i, _x, _y) ) {
             flag = false;
             break;
         } else {
