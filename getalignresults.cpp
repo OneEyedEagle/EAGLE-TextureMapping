@@ -344,9 +344,20 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
     if ( pointOnBoundary(img_id, x, y) )
         return false;
     // check the angle, if the angle is too small, then it's a bad projection
-    if ( info->cos_alpha > -0.5f )
+    if ( info->cos_alpha > -0.2f )
         return false;
     // the point can be projected to the position on img
+    return true;
+}
+bool getAlignResults::pointProjectionValidMesh(float point_z, size_t img_id, int x, int y)
+{
+    if(!pointProjectionValid(point_z, img_id, x, y))
+        return false;
+    size_t p_index = static_cast<size_t>(x + y * settings.imgW);
+    struct valid_info * info = &img_valid_info[img_id][p_index];
+    // a more rigid condition to generate much better obj
+    if ( info->cos_alpha > -0.6f )
+        return false;
     return true;
 }
 
@@ -355,7 +366,7 @@ bool getAlignResults::pointOnBoundary(size_t img_id, int x, int y)
 {
     // for a small patch which (x,y) is its center,
     //   if some weight in it is 0, then assume the point is on boundary
-    int hw = 3;
+    int hw = 2;
     for ( int dy = -hw; dy <= hw; dy++ ) {
         for ( int dx = -hw; dx <= hw; dx++ ) {
             if( !pointValid( x+dx, y+dy ) )

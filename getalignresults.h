@@ -83,6 +83,7 @@ public:
     bool pointValid(cv::Point2i p_img);
     bool pointValid(cv::Point2f p_img);
     bool pointProjectionValid(float point_z, size_t img_id, int x, int y);
+    bool pointProjectionValidMesh(float point_z, size_t img_id, int x, int y);
     bool pointOnBoundary(size_t img_id, int x, int y);
 
     void calcNormals();
