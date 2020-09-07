@@ -8,9 +8,11 @@ This is an attempt for implementation of the paper "Patch-Based Optimization for
    (I'm using Ubuntu 16.04, but the project works if you successfully install these things on Windows.)
 
 2. Open the project with **Qt creator** (be sure to set the Make path as same as the project path), then you need to edit the INCLUDE paths in _eagle_textureMapping.pro_ file to fit in your envirenment.
-   (If necessary, recompile _./lib/Eagle_Utils.cpp_ and _./patchmatch/eagle_pm_minimal.cpp_, the surfix \_id of the patchmatch bin filename is the patch width.)
+   (If necessary, recompile _./lib/Eagle_Utils.cpp_ .)
 
 3. **[UPDATE in 2020.1.9]** I upgrade a mini-version of TextureMapping codes, which only include things relating to Patch-Based Optimization. The old version can still be found on branch _Full-Ver_.
+
+4. **[UPDATE in 2020.9.7]** I added some settings in _getalignresults.cpp_ file's header, check their comments for more information. Also I editted the obj generation function for much better result, now you could edit the function _pointProjectionValidMesh_ to change the condition when generating the obj. It's recommanded to set a more rigid condition then that when iterating, to avoid reprojecting which is on the boundary.
 
 ## How to use
 
