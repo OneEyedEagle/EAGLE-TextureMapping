@@ -98,6 +98,7 @@ public:
     void showRemapping();
 
     void doIterations();
+    void doOBJGenerationOnly();
 
     void patchmatch(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Mat3i &ann);
     void patchmatch_iter(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Mat3i &ann, int dir);

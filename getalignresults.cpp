@@ -3,7 +3,16 @@
 /*----------------------------------------------
  *  Log Settings
  * ---------------------------------------------*/
+// if true, the T and M images under the folder <results_Bi17/targets> and <results_Bi17/textures>
+//   will be updated after each iteration
 #define OUTPUT_T_M_INSTANT false
+
+// if true, the M of all scales will be outputed to the folder <results_Bi17/results>
+#define OUTPUT_ALL_SCALE_M false
+
+// if true, do not do the iterations, but generate the obj with results
+//   if no M results exist, only texture S will be used to generate the obj
+#define GENERATE_OBJ_ONLY false
 
 /*----------------------------------------------
  *  Math
@@ -87,7 +96,10 @@ getAlignResults::getAlignResults(Settings &_settings)
     strftime(time_start_str, 32, "%Y.%m.%d %H:%M:%S", time_tmp);
     time(&start);
 
-    doIterations();
+     if (GENERATE_OBJ_ONLY)
+        doOBJGenerationOnly();
+    else
+        doIterations();
 
     gettimeofday(&tv, nullptr);
     time_tmp = localtime(&tv.tv_sec);
@@ -754,12 +766,21 @@ void getAlignResults::doIterations()
             }
 
         // save results
+        if ( OUTPUT_ALL_SCALE_M )
+            for( size_t i : kfIndexs ){
+                // [REQUIRE] ImageMagick
+                system( ("convert " + targetsFiles[i] + " -resize " + originResolution + "! " + resultsPath+"/"+getImgFilename(i, "T_", "_"+std::to_string(scale+1)+"."+settings.rgbNameExt)).c_str() );
+                system( ("convert " + texturesFiles[i] + " -resize " + originResolution + "! " + resultsPath+"/"+getImgFilename(i, "M_", "_"+std::to_string(scale+1)+"."+settings.rgbNameExt)).c_str() );
+            }
+        LOG( "[ Results at " + newResolution + " Saving Success ]" );
+    }
+    if ( !OUTPUT_ALL_SCALE_M ) {
+        scale = 9;
         for( size_t i : kfIndexs ){
             // [REQUIRE] ImageMagick
             system( ("convert " + targetsFiles[i] + " -resize " + originResolution + "! " + resultsPath+"/"+getImgFilename(i, "T_", "_"+std::to_string(scale+1)+"."+settings.rgbNameExt)).c_str() );
             system( ("convert " + texturesFiles[i] + " -resize " + originResolution + "! " + resultsPath+"/"+getImgFilename(i, "M_", "_"+std::to_string(scale+1)+"."+settings.rgbNameExt)).c_str() );
         }
-        LOG( "[ Results at " + newResolution + " Saving Success ]" );
     }
     for( size_t i : kfIndexs ) {
         std::string s_file = resultsPath+"/" +getImgFilename(i, "S_", "."+settings.rgbNameExt);
@@ -771,6 +792,38 @@ void getAlignResults::doIterations()
     generateTexturedOBJ(resultsPath, "M", "M_%03d_"+std::to_string(settings.scaleTimes));
     LOG("[ Generate OBJ file Success ]");
 }
+
+void getAlignResults::doOBJGenerationOnly()
+{
+    scaleF = 1;
+
+    sourcesImgs.clear();
+    for( size_t i : kfIndexs ) {
+        std::string filename = EAGLE::getFilename(sourcesOrigin[i]);
+        sourcesFiles[i] = sourcesPath + "/" + filename;
+        system( ("cp " + sourcesOrigin[i] + " " + sourcesFiles[i]).c_str() );
+        sourcesImgs[i] = cv::imread(sourcesFiles[i]);
+    }
+
+    // using ray intersection method to get all pixels' depth and weight
+    calcValidMesh();
+    // calculate relative patchs to speed up the patchmatch
+    calcValidPatch();
+    // doing the remapping to project a pixel to other views
+    calcRemapping();
+
+    for( size_t i : kfIndexs ) {
+        std::string s_file = resultsPath+"/" +getImgFilename(i, "S_", "."+settings.rgbNameExt);
+        generateTextureIWithS(i, s_file);
+    }
+    generateTexturedOBJ(resultsPath, "S", "S_%03d");
+
+    if (EAGLE::isFileExist(resultsPath + "/M_000_10."+settings.rgbNameExt) )
+        generateTexturedOBJ(resultsPath, "M", "M_%03d_"+std::to_string(settings.scaleTimes));
+
+    LOG("[ Generate OBJ file Success ]");
+}
+
 
 /*----------------------------------------------
  *  PatchMatch
@@ -1043,6 +1096,9 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
                 weight = weights[t].at<float>(Xij(1), Xij(0));
                 pixel = targets[t].at<cv::Vec3b>(Xij(1), Xij(0));
 
+                if ( texture_id == t && weight < 0.1f)
+                    weight = 0.1f;
+
                 sum_w += weight;
                 for( int p_i = 0; p_i < 3; p_i++ )
                     sum(p_i) = sum(p_i) + weight * pixel(p_i);
@@ -1097,6 +1153,9 @@ void getAlignResults::generateTextureIWithS(size_t texture_id, std::string fulln
             if ( Xij(2) > 0 ) {
                 weight = weights[t].at<float>(Xij(1), Xij(0));
                 pixel = sourcesImgs[t].at<cv::Vec3b>(Xij(1), Xij(0));
+
+                if ( texture_id == t && weight < 0.1f)
+                    weight = 0.1f;
 
                 sum_w += weight;
                 for( int p_i = 0; p_i < 3; p_i++ )
@@ -1186,11 +1245,10 @@ bool getAlignResults::checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<c
         cv::Mat X_img = worldToImg(X_w, img_i);
         int _x = static_cast<int>( round(static_cast<double>(X_img.at<float>(0))) );
         int _y = static_cast<int>( round(static_cast<double>(X_img.at<float>(1))) );
-        if( !pointProjectionValid(X_img.at<float>(2), img_i, _x, _y) ) {
+        v_uv[p_i] = cv::Point2i(_x, _y);
+        if( !pointProjectionValidMesh(X_img.at<float>(2), img_i, _x, _y) ) {
             flag = false;
             break;
-        } else {
-            v_uv[p_i] = cv::Point2i(_x, _y);
         }
     }
     return flag;
