@@ -350,8 +350,11 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
    // get the position's valid info
     size_t p_index = static_cast<size_t>(x + y * settings.imgW);
     struct valid_info * info = &img_valid_info[img_id][p_index];
-    // check the depth (whether the point is occluded)
-    if ( point_z > info->depth + 0.01f )
+    // on the background
+    if ( info->depth < 0.01f )
+        return false;
+    // check the depth (whether the point is occluded or too close)
+    if ( point_z > info->depth + 0.02f || point_z < info->depth - 0.02f )
         return false;
     if ( pointOnBoundary(img_id, x, y) )
         return false;
@@ -381,10 +384,15 @@ bool getAlignResults::pointOnBoundary(size_t img_id, int x, int y)
     int hw = 2;
     for ( int dy = -hw; dy <= hw; dy++ ) {
         for ( int dx = -hw; dx <= hw; dx++ ) {
-            if( !pointValid( x+dx, y+dy ) )
+            int x_ = x + dx;
+            int y_ = y + dy;
+            if( !pointValid( x_, y_ ) )
                 continue;
-            if ( weights[img_id].at<float>(y + dy, x + dx) < 0.01f )
+            size_t p_index = static_cast<size_t>(x_ + y_ * settings.imgW);
+            struct valid_info * info = &img_valid_info[img_id][p_index];
+            if ( info->depth < 0.01f )
                 return true;
+
         }
     }
     return false;
@@ -595,9 +603,13 @@ void getAlignResults::calcImgValidPatch(size_t img_i)
 }
 int getAlignResults::isPatchValid(size_t img_i, int x, int y)
 {
-    // if the center is valid, then believe it's valid
-    if ( weights[img_i].at<float>(y + settings.patchWidth/2, x + settings.patchWidth/2) > 0)
-        return 1; // valid patch;
+    // if any pixel is valid, then it's valid
+    for ( int dx = 0; dx < settings.patchWidth; dx++ ) {
+        for ( int dy = 0; dy < settings.patchWidth; dy++ ) {
+            if ( weights[img_i].at<float>(y + dy, x + dx) > 0 )
+                return 1; // valid patch
+        }
+    }
     return 0;
 }
 
@@ -705,13 +717,36 @@ void getAlignResults::doIterations()
         LOG("[ Scale to " + newResolution + " (" + std::to_string(scale+1) + ") ]");
         LOG("[ Lamda: " + std::to_string(lamda) + " ]");
 
+        // using ray intersection method to get all pixels' depth and weight
+        calcValidMesh();
+        // calculate relative patchs to speed up the patchmatch
+        calcValidPatch();
+        // doing the remapping to project a pixel to other views
+        calcRemapping();
+
         // generate source imgs with new resolution // [REQUIRE] ImageMagick
         sourcesImgs.clear();
         for( size_t i : kfIndexs ) {
             std::string filename = EAGLE::getFilename(sourcesOrigin[i]);
             sourcesFiles[i] = sourcesPath + "/" + filename;
             system( ("convert " + sourcesOrigin[i] + " -resize " + newResolution + "! " + sourcesFiles[i]).c_str() );
-            sourcesImgs[i] = cv::imread(sourcesFiles[i]);
+
+            // get the mask from the depth
+            cv::Mat depth_show = cv::imread(weightsPath + "/weight_"+std::to_string(i)+".png");
+            cv::Mat depth_show_gray;
+            cv::cvtColor(depth_show, depth_show_gray, cv::COLOR_BGR2GRAY);
+            int threshold_v = 10;
+            cv::Mat mask;
+            cv::threshold(depth_show_gray, mask, threshold_v, 256, cv::THRESH_BINARY);
+
+            // apply the mask to source
+            cv::Mat img = cv::imread(sourcesFiles[i]);
+            cv::Mat img_masked;
+            img.copyTo(img_masked, mask);
+            cv::imwrite(sourcesFiles[i], img_masked);
+            sourcesImgs[i] = img_masked;
+
+            //sourcesImgs[i] = cv::imread(sourcesFiles[i]);
         }
         // init Ti and Mi or upsample
         if ( init_T_M == true ) {
@@ -734,13 +769,6 @@ void getAlignResults::doIterations()
             targetsImgs[i] = cv::imread(targetsFiles[i]);
             texturesImgs[i] = cv::imread(texturesFiles[i]);
         }
-
-        // using ray intersection method to get all pixels' depth and weight
-        calcValidMesh();
-        // calculate relative patchs to speed up the patchmatch
-        calcValidPatch();
-        // doing the remapping to project a pixel to other views
-        calcRemapping();
 
         // do iterations
         for ( size_t _count = 0; _count < settings.scaleIters[scale]; _count++) {
@@ -839,12 +867,8 @@ void getAlignResults::patchmatch(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Ma
         if( i < settings.imgW - settings.patchWidth + 1 && j < settings.imgH - settings.patchWidth + 1 )
             ann.at<cv::Vec3i>(j, i)(2) = dist(a, b, i, j, i, j, INT_MAX);
     }
-    patchmatch_iter(img_id, a, b, ann, 0);
-    patchmatch_iter(img_id, a, b, ann, 1);
-    patchmatch_iter(img_id, a, b, ann, 0);
-    patchmatch_iter(img_id, a, b, ann, 1);
-    patchmatch_iter(img_id, a, b, ann, 0);
-    patchmatch_iter(img_id, a, b, ann, 1);
+    for ( int i = 0; i < 5; i++ )
+        patchmatch_iter(img_id, a, b, ann, i % 2);
 }
 void getAlignResults::patchmatch_iter(size_t img_id, cv::Mat3b a, cv::Mat3b b, cv::Mat3i &ann, int dir)
 {
@@ -961,7 +985,7 @@ void getAlignResults::generateTargetI(size_t target_id, std::map<size_t, cv::Mat
 
     // calculate E1
     double E1_1 = 0, E1_2 = 0;
-#pragma omp parallel for
+//#pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
@@ -1077,7 +1101,7 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
 {
     int total = settings.imgH * settings.imgW;
     cv::Mat3b texture( cv::Size(settings.imgW, settings.imgH), cv::Vec3b(255,255,255) );
-#pragma omp parallel for
+//#pragma omp parallel for
     for ( int index = 0; index < total; index++) {
         int j = index / settings.imgW;
         int i = index % settings.imgW;
@@ -1095,9 +1119,6 @@ void getAlignResults::generateTextureI(size_t texture_id, std::map<size_t, cv::M
             if ( Xij(2) > 0 ){
                 weight = weights[t].at<float>(Xij(1), Xij(0));
                 pixel = targets[t].at<cv::Vec3b>(Xij(1), Xij(0));
-
-                if ( texture_id == t && weight < 0.1f)
-                    weight = 0.1f;
 
                 sum_w += weight;
                 for( int p_i = 0; p_i < 3; p_i++ )
