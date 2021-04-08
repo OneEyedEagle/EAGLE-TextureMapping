@@ -364,17 +364,6 @@ bool getAlignResults::pointProjectionValid(float point_z, size_t img_id, int x, 
     // the point can be projected to the position on img
     return true;
 }
-bool getAlignResults::pointProjectionValidMesh(float point_z, size_t img_id, int x, int y)
-{
-    if(!pointProjectionValid(point_z, img_id, x, y))
-        return false;
-    size_t p_index = static_cast<size_t>(x + y * settings.imgW);
-    struct valid_info * info = &img_valid_info[img_id][p_index];
-    // a more rigid condition to generate much better obj
-    if ( info->cos_alpha > -0.6f )
-        return false;
-    return true;
-}
 
 // check if the img_id's (x, y) is on the boundary of the object
 bool getAlignResults::pointOnBoundary(size_t img_id, int x, int y)
@@ -529,10 +518,10 @@ void getAlignResults::calcImgValidMesh(size_t img_i, BVHTree &bvhtree)
             size_t v3_id = mesh.polygons[info->mesh_id].vertices[2];
 
             // calc world position
-            float _x = cloud_rgb.points[v1_id].x * w(0) + cloud_rgb.points[v2_id].x * w(1) + cloud_rgb.points[v3_id].x * w(2);
-            float _y = cloud_rgb.points[v1_id].y * w(0) + cloud_rgb.points[v2_id].y * w(1) + cloud_rgb.points[v3_id].y * w(2);
-            float _z = cloud_rgb.points[v1_id].z * w(0) + cloud_rgb.points[v2_id].z * w(1) + cloud_rgb.points[v3_id].z * w(2);
-            float d2 = (cam_world_p(0)-_x)*(cam_world_p(0)-_x) + (cam_world_p(1)-_y)*(cam_world_p(1)-_y) + (cam_world_p(2)-_z)*(cam_world_p(2)-_z);
+//            float _x = cloud_rgb.points[v1_id].x * w(0) + cloud_rgb.points[v2_id].x * w(1) + cloud_rgb.points[v3_id].x * w(2);
+//            float _y = cloud_rgb.points[v1_id].y * w(0) + cloud_rgb.points[v2_id].y * w(1) + cloud_rgb.points[v3_id].y * w(2);
+//            float _z = cloud_rgb.points[v1_id].z * w(0) + cloud_rgb.points[v2_id].z * w(1) + cloud_rgb.points[v3_id].z * w(2);
+            float d2 = depth * depth; // (cam_world_p(0)-_x)*(cam_world_p(0)-_x) + (cam_world_p(1)-_y)*(cam_world_p(1)-_y) + (cam_world_p(2)-_z)*(cam_world_p(2)-_z);
             if ( d2 < d2_min )
                 d2_min = d2;
             if ( d2 > d2_max )
@@ -1216,26 +1205,34 @@ void getAlignResults::generateTexturedOBJ(std::string path, std::string filename
     for( size_t img_i : kfIndexs )
         mesh_info[img_i] = std::vector<struct face_info>();
 
-    std::vector<cv::Point2i> v_uv(3);
-    for( size_t i = 0; i < mesh_num; i++ ) {
+    std::vector<cv::Point2i> v_uv(3), v_uv_tmp(3);
+    for( size_t mesh_i = 0; mesh_i < mesh_num; mesh_i++ ) {
         size_t img_index = kfTotal;
+        float img_score_min = 10.0f, img_score;
         for( size_t img_i : kfIndexs ) {
-            if (checkMeshMapImg(i, img_i, v_uv) == true) {
-                img_index = img_i;
-                break;
+            img_score = 0.0f;
+            if (checkMeshMapImg(mesh_i, img_i, v_uv_tmp, img_score) == true) {
+                if (img_score < img_score_min) {
+                    v_uv[0] = v_uv_tmp[0];
+                    v_uv[1] = v_uv_tmp[1];
+                    v_uv[2] = v_uv_tmp[2];
+                    img_score_min = img_score;
+                    img_index = img_i;
+                }
             }
         }
         if ( img_index < kfTotal ) {
             // valid mesh, then find its 3 points' uv-coord's index
             struct face_info info;
             for(size_t p_i = 0; p_i < 3; p_i++) {
-                size_t v_index = mesh.polygons[i].vertices[p_i];
+                size_t v_index = mesh.polygons[mesh_i].vertices[p_i];
                 // to get its uv-coord index
                 size_t uv_coord_index = 0;
                 // if its uv-coord has been put into the uv_coords
                 if ( vertex_uv_index[img_index][v_index] > 0 ) {
                     uv_coord_index = vertex_uv_index[img_index][v_index];
-                } else { // put into a new uv-coord into the uv_coords
+                } else
+                { // put into a new uv-coord into the uv_coords
                     float uv_x = (v_uv[p_i].x + 0.5f) / settings.imgW;
                     float uv_y = (v_uv[p_i].y + 0.5f) / settings.imgH;
                     uv_coords.push_back( cv::Point2f(uv_x, uv_y) );
@@ -1254,9 +1251,10 @@ void getAlignResults::generateTexturedOBJ(std::string path, std::string filename
         }
     }
     saveOBJwithMTL(path, filename, resultImgNamePattern, cloud_rgb, uv_coords, mesh_info);
+    writeCameraTraj(resultImgNamePattern);
 }
 
-bool getAlignResults::checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<cv::Point2i> &v_uv)
+bool getAlignResults::checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<cv::Point2i> &v_uv, float &score)
 {
     v_uv.clear();
     bool flag = true;
@@ -1267,10 +1265,14 @@ bool getAlignResults::checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<c
         int _x = static_cast<int>( round(static_cast<double>(X_img.at<float>(0))) );
         int _y = static_cast<int>( round(static_cast<double>(X_img.at<float>(1))) );
         v_uv[p_i] = cv::Point2i(_x, _y);
-        if( !pointProjectionValidMesh(X_img.at<float>(2), img_i, _x, _y) ) {
+        if( !pointProjectionValid(X_img.at<float>(2), img_i, _x, _y) ) {
             flag = false;
             break;
         }
+        // save the score to select a view with maximum score
+        size_t p_index = static_cast<size_t>(_x + _y * settings.imgW);
+        struct valid_info * info = &img_valid_info[img_i][p_index];
+        score += info->cos_alpha;
     }
     return flag;
 }
