@@ -120,7 +120,7 @@ public:
     };
     void generateTexturedOBJ(std::string path, std::string filename, std::string resultImgNamePattern);
     void saveOBJwithMTL(std::string path, std::string filename, std::string resultImgNamePattern, pcl::PointCloud<pcl::PointXYZRGB> cloud, std::vector<cv::Point2f> uv_coords, std::map<size_t, std::vector<struct face_info>> mesh_info);
-    bool checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<cv::Point2i> &v_uv);
+    bool checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<cv::Point2i> &v_uv, float &score);
 };
 
 #endif // GETALIGNRESULTS_H

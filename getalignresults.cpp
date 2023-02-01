@@ -1251,7 +1251,7 @@ void getAlignResults::generateTexturedOBJ(std::string path, std::string filename
         }
     }
     saveOBJwithMTL(path, filename, resultImgNamePattern, cloud_rgb, uv_coords, mesh_info);
-    writeCameraTraj(resultImgNamePattern);
+//     writeCameraTraj(resultImgNamePattern);
 }
 
 bool getAlignResults::checkMeshMapImg(size_t mesh_i, size_t img_i, std::vector<cv::Point2i> &v_uv, float &score)
